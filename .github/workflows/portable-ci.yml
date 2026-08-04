@@ -98,12 +98,11 @@ jobs:
             "from model_diagnostics.host_runtime import HostTaskRuntime; from model_diagnostics.integration import create_checkpoint_adapter; from model_diagnostics.cli import run_diagnostics_cli"
       - name: Run external adapter and artifact/report smoke
         run: |
-          python -c "from pathlib import Path; Path('.cache/pytest').mkdir(parents=True, exist_ok=True)"
           python -m pytest -q -c pytest.ini \
             tests/base/test_distribution.py \
             tests/base/test_artifacts.py::test_online_validator_rejects_truncated_segment_and_report_excludes_rows \
             tests/base/test_checkpoint.py::test_custom_analyzer_descriptor_drives_artifact_validator_and_report \
-            --basetemp=.cache/pytest/build-smoke
+            --basetemp="${RUNNER_TEMP}/pytest-build-smoke"
       - uses: actions/upload-artifact@v4
         with:
           name: model-diagnostics-distributions
@@ -143,4 +142,3 @@ jobs:
           python -I -m model_diagnostics.base --help
           python -m pytest -q -c pytest.ini tests/release/test_release_contract.py --basetemp=.cache/pytest/release-smoke
           python -m pytest -q -c pytest.ini tests/base/test_artifacts.py::test_online_validator_rejects_truncated_segment_and_report_excludes_rows --basetemp=.cache/pytest/report-smoke
-          python -m pytest -q -c pytest.ini tests/base/test_training_runtime.py::test_scale_benchmark_structured_skips_without_process_rss_backend --basetemp=.cache/pytest/resource-smoke

@@ -25,6 +25,7 @@ classifiers = [
 test = [
     "build>=1.2,<2",
     "pytest>=8,<10",
+    "tomli>=2,<3; python_version < '3.11'",
 ]
 
 [tool.setuptools]

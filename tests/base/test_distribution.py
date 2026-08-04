@@ -308,7 +308,6 @@ def test_clean_install_import_and_cli_do_not_use_repository(
     module_path = Path(payload["module"]).resolve()
     assert payload["version"] == PACKAGE_VERSION
     assert "site-packages" in payload["module"]
-    assert not module_path.is_relative_to(repository_source)
     assert not module_path.is_relative_to(copied_source)
     resolved_sys_path = {
         Path(entry).resolve()

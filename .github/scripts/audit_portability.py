@@ -136,7 +136,11 @@ def _audit_imports(source_root: Path, files: tuple[Path, ...]) -> list[str]:
         in_tests = relative.parts[0] == "tests"
         for module in _resolved_imports(source_root, path):
             root = module.partition(".")[0]
-            if root in stdlib or root == "torch" or in_tests and root == "pytest":
+            if (
+                root in stdlib
+                or root == "torch"
+                or in_tests and root in {"pytest", "tomli"}
+            ):
                 continue
             if module == "<distribution-root-escape>":
                 errors.append(f"{relative}: relative import escapes distribution root")

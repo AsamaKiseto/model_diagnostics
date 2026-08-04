@@ -9,8 +9,12 @@ from pathlib import Path
 import subprocess
 import sys
 import tarfile
-import tomllib
 import zipfile
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -135,4 +139,3 @@ def test_distribution_audit_rejects_members_outside_positive_allow_list(
     assert "leaves runtime allow-list" in result.stderr
     assert "leaves source allow-list" in result.stderr
     assert "absolute local path is not portable" in result.stderr
-
