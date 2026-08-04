@@ -1,0 +1,19 @@
+Model Diagnostics — Proprietary Notice
+
+Copyright (c) the applicable copyright holder(s). All rights reserved.
+
+This source distribution is provided for authorized internal use, evaluation,
+testing, and maintenance only. No patent, copyright, trademark, sublicensing,
+redistribution, or other external-use permission is granted by this notice.
+
+No open-source license is granted for this package. The package metadata uses
+the SPDX expression "LicenseRef-Proprietary" to make that limitation explicit.
+Third-party dependencies, including PyTorch, remain governed by their own
+licenses.
+
+OWNER ACTION REQUIRED BEFORE EXTERNAL DISTRIBUTION:
+The rights holder must approve or replace this notice, select the intended
+license, update the package metadata, and verify all third-party obligations
+before publishing or redistributing the package outside the authorized
+environment.
+

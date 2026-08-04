@@ -1,0 +1,70 @@
+/*
+ * 仅保留为通用视觉设计参考，不属于 active diagnostics runtime。
+ * 新诊断报告不得 import 或在运行时读取本文件。
+ */
+:root {
+  --ground: #ebeef2;
+  --panel: #ffffff;
+  --panel-soft: #f6f8fa;
+  --ink: #12151b;
+  --ink-muted: #535a66;
+  --line: #e0e4ea;
+  --accent: #0c8f89;
+  --accent-strong: #0a6e69;
+  --critical: #ce3a3f;
+  --critical-bg: #fbecec;
+  --warning: #b8730f;
+  --warning-bg: #fbf1e2;
+  --healthy: #2c8f5f;
+  --healthy-bg: #e9f4ed;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #0b0e13;
+    --panel: #13171e;
+    --panel-soft: #191e27;
+    --ink: #e7ebf1;
+    --ink-muted: #98a0ad;
+    --line: #222834;
+    --accent: #28cfc7;
+    --accent-strong: #1fa9a2;
+    --critical: #ff6166;
+    --critical-bg: #2a1618;
+    --warning: #efa83c;
+    --warning-bg: #271e11;
+    --healthy: #48c487;
+    --healthy-bg: #12241a;
+  }
+}
+
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.diagnostics-card {
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.diagnostics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.diagnostics-table th,
+.diagnostics-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.status-critical { color: var(--critical); background: var(--critical-bg); }
+.status-warning { color: var(--warning); background: var(--warning-bg); }
+.status-healthy { color: var(--healthy); background: var(--healthy-bg); }

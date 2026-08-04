@@ -1,0 +1,143 @@
+# 验证独立发行在声明的 Python/PyTorch CPU 边界与常见桌面平台上可用。
+name: portable-distribution-ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONNOUSERSITE: "1"
+
+concurrency:
+  group: portable-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-version-matrix:
+    name: Linux / Python ${{ matrix.python }} / torch ${{ matrix.torch }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.10"
+            torch: "2.5.1"
+          - python: "3.11"
+            torch: "2.5.1"
+          - python: "3.12"
+            torch: "2.5.1"
+          - python: "3.10"
+            torch: "2.10.0"
+          - python: "3.11"
+            torch: "2.10.0"
+          - python: "3.12"
+            torch: "2.10.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install the exact official CPU wheel and portable test tools
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==${{ matrix.torch }}"
+          python -m pip install "pytest>=8,<10"
+          python -m pip install --no-deps -e .
+      - name: Run portable contract suite
+        run: |
+          python -m pytest -q -c pytest.ini \
+            tests/base tests/extensions tests/host_runtime tests/release \
+            --ignore=tests/base/test_distribution.py \
+            --basetemp=.cache/pytest/basetemp \
+            -k "not scale_benchmark"
+
+  build-and-clean-install:
+    name: Build, audit, clean install, adapter and report smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install upper-bound CPU test tools
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.10.0"
+          python -m pip install "build>=1.2,<2" "pytest>=8,<10"
+      - name: Build wheel and sdist
+        run: python -m build --wheel --sdist --outdir dist
+      - name: Audit source and distribution contents
+        run: python .github/scripts/audit_portability.py --source-root . --dist-dir dist
+      - name: Install wheel into an isolated environment
+        shell: bash
+        run: |
+          python -m venv "${RUNNER_TEMP}/model-diagnostics-clean"
+          "${RUNNER_TEMP}/model-diagnostics-clean/bin/python" -m pip install \
+            --index-url https://download.pytorch.org/whl/cpu "torch==2.10.0"
+          "${RUNNER_TEMP}/model-diagnostics-clean/bin/python" -m pip install \
+            --no-deps dist/*.whl
+          mkdir -p "${RUNNER_TEMP}/empty"
+          cd "${RUNNER_TEMP}/empty"
+          "${RUNNER_TEMP}/model-diagnostics-clean/bin/python" -I -c \
+            "import model_diagnostics; print(model_diagnostics.__file__)"
+          "${RUNNER_TEMP}/model-diagnostics-clean/bin/python" -I \
+            -m model_diagnostics.base --help
+          "${RUNNER_TEMP}/model-diagnostics-clean/bin/python" -I -c \
+            "from model_diagnostics.host_runtime import HostTaskRuntime; from model_diagnostics.integration import create_checkpoint_adapter; from model_diagnostics.cli import run_diagnostics_cli"
+      - name: Run external adapter and artifact/report smoke
+        run: |
+          python -m pytest -q -c pytest.ini \
+            tests/base/test_distribution.py \
+            tests/base/test_artifacts.py::test_online_validator_rejects_truncated_segment_and_report_excludes_rows \
+            tests/base/test_checkpoint.py::test_custom_analyzer_descriptor_drives_artifact_validator_and_report \
+            --basetemp=.cache/pytest/build-smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: model-diagnostics-distributions
+          path: dist/*
+          if-no-files-found: error
+
+  desktop-platform-smoke:
+    name: ${{ matrix.os }} / Python 3.12 / torch 2.10
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2025
+          - macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install torch from the official Windows CPU index
+        if: runner.os == 'Windows'
+        run: python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.10.0"
+      - name: Install the official macOS wheel
+        if: runner.os == 'macOS'
+        run: python -m pip install "torch==2.10.0"
+      - name: Install portable package and pytest
+        run: |
+          python -m pip install "pytest>=8,<10"
+          python -m pip install --no-deps -e .
+      - name: Run import, CLI, report and resource fallback smoke
+        run: |
+          python -I -m model_diagnostics.base --help
+          python -m pytest -q -c pytest.ini tests/release/test_release_contract.py --basetemp=.cache/pytest/release-smoke
+          python -m pytest -q -c pytest.ini tests/base/test_artifacts.py::test_online_validator_rejects_truncated_segment_and_report_excludes_rows --basetemp=.cache/pytest/report-smoke
+          python -m pytest -q -c pytest.ini tests/base/test_training_runtime.py::test_scale_benchmark_structured_skips_without_process_rss_backend --basetemp=.cache/pytest/resource-smoke

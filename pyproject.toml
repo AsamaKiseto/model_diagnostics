@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "model-diagnostics"
+version = "0.1.0"
+description = "Task-neutral diagnostics for PyTorch modules, autograd, checkpoints, and optional analysis extensions"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.10,<3.13"
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE"]
+dependencies = ["torch>=2.5,<2.11"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+test = [
+    "build>=1.2,<2",
+    "pytest>=8,<10",
+]
+
+[tool.setuptools]
+include-package-data = false
+package-dir = { model_diagnostics = "." }
+packages = [
+    "model_diagnostics",
+    "model_diagnostics.base",
+    "model_diagnostics.base.artifacts",
+    "model_diagnostics.base.checkpoint",
+    "model_diagnostics.base.hierarchy",
+    "model_diagnostics.base.interventions",
+    "model_diagnostics.base.measurements",
+    "model_diagnostics.base.registry",
+    "model_diagnostics.base.reporting",
+    "model_diagnostics.base.runtime",
+    "model_diagnostics.extensions",
+    "model_diagnostics.extensions.input_dependence",
+    "model_diagnostics.extensions.multi_objective",
+    "model_diagnostics.extensions.rollout",
+    "model_diagnostics.host_runtime",
+    "model_diagnostics.integration",
+]
