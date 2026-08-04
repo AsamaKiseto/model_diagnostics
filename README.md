@@ -15,6 +15,27 @@ python -m model_diagnostics.extensions report --run-dir <run-dir>
 pytest -q -c pytest.ini tests
 ```
 
+## 安装发布版
+
+发布产物位于私有 GitHub 仓库的 release。已获授权的环境可下载 wheel 后安装：
+
+```bash
+gh release download v0.1.0 \
+  --repo AsamaKiseto/model_diagnostics \
+  --pattern 'model_diagnostics-0.1.0-py3-none-any.whl'
+python -m pip install ./model_diagnostics-0.1.0-py3-none-any.whl
+```
+
+也可以通过已有 SSH 凭据直接安装固定 tag：
+
+```bash
+python -m pip install \
+  'model-diagnostics @ git+ssh://git@github.com/AsamaKiseto/model_diagnostics.git@v0.1.0'
+```
+
+参与 package 开发时，推荐把本仓库与宿主仓库放在同一父目录；宿主可优先解析该源码树，
+缺失时再使用已安装 distribution。该优先级由宿主入口实现，本 package 不读取宿主路径。
+
 Base report 只启用 Base renderer；extension report 通过显式、无全局注册的 catalog
 factory 加入 multi-objective、input-dependence 和 rollout renderer。生成的
 `diagnostics-report.html` 按“训练过程监测、逐检查点异常监测、最终模型分析、证据与
