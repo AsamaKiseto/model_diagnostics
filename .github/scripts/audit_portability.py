@@ -139,7 +139,7 @@ def _audit_imports(source_root: Path, files: tuple[Path, ...]) -> list[str]:
             if (
                 root in stdlib
                 or root == "torch"
-                or in_tests and root in {"pytest", "tomli"}
+                or in_tests and root in {"pytest", "tomli", "tomllib"}
             ):
                 continue
             if module == "<distribution-root-escape>":
