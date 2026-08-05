@@ -4,13 +4,30 @@
 
 | Extension | 输入 | 输出 | 明确不包含 |
 |---|---|---|---|
-| `input_dependence` | 通用输入/输出 identity、identity/mean replacement | input×output effect | donor、conditional permutation、时序匹配 |
+| `input_dependence` | 通用输入/输出 identity、identity/mean replacement、多尺度输出能量充分统计 | input×output effect、对称相对输出响应 `S_ij(s)` | donor、conditional permutation、时序匹配 |
 | `multi_objective` | actual objective A、complement、shared terms | model-wide cosine、norm ratio、partition/supervision coverage、共同活跃参数比例 | PCGrad、CAGrad、GradNorm、Recon、fresh branch |
 | `rollout` | 显式 `ScenarioSpec` 与 free `RolloutTrace` | RMSE/sRMSE、逐步 mean/q90 误差、最大局部斜率、episode、cohort 覆盖 | 2×2 feedback、Oracle、隐式 horizon、AUC、中位 slope、boundary jump、bootstrap |
 
 representation probe、sequence memory/ECL 和 autoregressive feedback extension 已从当前
 生产 catalog 删除。若未来重新引入，必须有独立运行预算和面向用户问题的验收，不得仅因
 已有算法实现而恢复。
+
+`final_input_sensitivity` 只在 final-selected 阶段运行。对每个输入通道使用同一确定性
+Rademacher 方向，在任务 profile 声明的多个模型输入坐标幅度上执行正负配对扰动。对
+样本 (q) 和方向 (d\in\{-1,+1\})，先在同一 validity/support 上计算
+
+\[
+R_{ijqd}(s)=
+\frac{2\operatorname{RMS}(\hat y^{(d)}_{jq}(s)-\hat y^{(0)}_{jq})}
+{\operatorname{RMS}(\hat y^{(d)}_{jq}(s))+\operatorname{RMS}(\hat y^{(0)}_{jq})},
+\qquad
+S_{ij}(s)=\sqrt{\frac{1}{2Q}\sum_q\left(R_{ijq-}^2+R_{ijq+}^2\right)}.
+\]
+
+该无量纲指标范围为 0–2，只相对于输出自身 RMS 定标；训练集标准差、逐 shot 特征和
+输入扰动 RMS 均不进入分母。artifact 按 `input × output × scale` 保存 cohort 结果。
+报告固定提供可切换幅度的完整矩阵和指定输入/输出的幅度—响应曲线；该结果只表示模型
+预测敏感度，不表示物理因果。
 
 `multi_objective` 的 `gradient_dot`、两个 objective gradient norm、negative-dot、
 gradient numel 和 partition residual/tolerance 只作为复算与有效性原始字段保留，不注册

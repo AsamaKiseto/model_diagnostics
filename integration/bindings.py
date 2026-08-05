@@ -202,6 +202,12 @@ def _default_capability_bindings(
             ),
         ),
         (
+            "model_diagnostics.extensions.input_dependence",
+            "final_input_sensitivity",
+            _run_final_input_sensitivity,
+            frozenset({"component_catalog", "input_sensitivity"}),
+        ),
+        (
             "model_diagnostics.extensions.multi_objective",
             "final_objective_conflict",
             _run_final_objective_conflict,
@@ -896,6 +902,253 @@ def _run_final_channel_influence(
     )
 
 
+def _run_final_input_sensitivity(
+    context: AnalyzerRunContext,
+) -> AnalyzerExecutionResult:
+    """计算多尺度、正负配对的完整 input × output 相对输出响应。
+
+    每个样本只执行一次未扰动基线。某个 ``input × scale`` 只有在相同确定性
+    Rademacher 方向的正负两个分支都成功时才进入 cohort 统计，避免单侧扰动把
+    非对称响应误写成尺度敏感度。每个方向先相对于该样本输出自身 RMS 归一化，
+    再对方向和样本做等权 RMS；输入差分能量只验证干预执行，不进入指标分母。
+    """
+
+    from model_diagnostics.extensions.input_dependence import (
+        symmetric_relative_output_response,
+    )
+
+    capability = _runtime_capability(context, "input_sensitivity")
+    adapter = context.adapter
+    summaries: dict[tuple[str, str, float], dict[str, Any]] = {}
+    failures: dict[tuple[str, str, float, str], dict[str, Any]] = {}
+    scales = tuple(sorted({float(value) for value in capability.scales}))
+    if not scales or any(not math.isfinite(value) or value <= 0 for value in scales):
+        return _execution_result(
+            "final_input_sensitivity",
+            (_insufficient("input_sensitivity_scales_are_invalid"),),
+        )
+
+    for sample in context.samples:
+        batch = adapter.materialize_sample(context.loaded, sample)
+        inputs, outputs, _digest = adapter.component_catalog(
+            context.loaded,
+            batch,
+        )
+        baseline_unit = adapter.execute_objective_unit(
+            context.loaded,
+            batch,
+            objective={"response_only": True},
+            return_aux=False,
+        )
+        for input_ref in inputs:
+            input_id = input_ref.component.component_id
+            seed = int(
+                stable_json_hash(
+                    {
+                        "analyzer": "final_input_sensitivity",
+                        "sample_id": sample.sample_id,
+                        "input_component_id": input_id,
+                    }
+                )[:16],
+                16,
+            ) % (2**63 - 1)
+            for scale in scales:
+                branches: dict[int, tuple[Any, dict[str, Any]]] = {}
+                failure_reason: str | None = None
+                for direction in (-1, 1):
+                    try:
+                        perturbation = capability.perturb(
+                            batch=batch,
+                            input=input_ref,
+                            scale=scale,
+                            direction=direction,
+                            direction_seed=seed,
+                        )
+                        condition_unit = adapter.execute_objective_unit(
+                            context.loaded,
+                            perturbation.batch,
+                            objective={"response_only": True},
+                            return_aux=False,
+                        )
+                        output_responses = capability.compare_outputs(
+                            batch=perturbation.batch,
+                            baseline_unit=baseline_unit,
+                            condition_unit=condition_unit,
+                            outputs=outputs,
+                        )
+                        branches[direction] = (
+                            perturbation,
+                            {
+                                item.output.component.component_id: item
+                                for item in output_responses
+                            },
+                        )
+                    except RuntimeError as error:
+                        if not hasattr(error, "code"):
+                            raise
+                        failure_reason = str(error)
+                        break
+                if set(branches) != {-1, 1}:
+                    reason = failure_reason or "paired_perturbation_incomplete"
+                    for output in outputs:
+                        state = failures.setdefault(
+                            (
+                                input_id,
+                                output.component.component_id,
+                                scale,
+                                reason,
+                            ),
+                            {"sample_count": 0, "group_ids": set()},
+                        )
+                        state["sample_count"] += 1
+                        if sample.group_id is not None:
+                            state["group_ids"].add(sample.group_id)
+                    continue
+
+                negative, negative_outputs = branches[-1]
+                positive, positive_outputs = branches[1]
+                paired_output_ids = set(negative_outputs) & set(positive_outputs)
+                for output in outputs:
+                    output_id = output.component.component_id
+                    if output_id in paired_output_ids:
+                        continue
+                    state = failures.setdefault(
+                        (
+                            input_id,
+                            output_id,
+                            scale,
+                            "output_response_unavailable",
+                        ),
+                        {"sample_count": 0, "group_ids": set()},
+                    )
+                    state["sample_count"] += 1
+                    if sample.group_id is not None:
+                        state["group_ids"].add(sample.group_id)
+                for output_id in paired_output_ids:
+                    negative_output = negative_outputs[output_id]
+                    positive_output = positive_outputs[output_id]
+                    negative_response = symmetric_relative_output_response(
+                        baseline_output_square_sum=(
+                            negative_output.baseline_output_square_sum
+                        ),
+                        condition_output_square_sum=(
+                            negative_output.condition_output_square_sum
+                        ),
+                        output_difference_square_sum=(
+                            negative_output.output_difference_square_sum
+                        ),
+                        support_count=negative_output.support_count,
+                    )
+                    positive_response = symmetric_relative_output_response(
+                        baseline_output_square_sum=(
+                            positive_output.baseline_output_square_sum
+                        ),
+                        condition_output_square_sum=(
+                            positive_output.condition_output_square_sum
+                        ),
+                        output_difference_square_sum=(
+                            positive_output.output_difference_square_sum
+                        ),
+                        support_count=positive_output.support_count,
+                    )
+                    key = (input_id, output_id, scale)
+                    state = summaries.setdefault(
+                        key,
+                        {
+                            "paired_response_square_sum": 0.0,
+                            "output_support_count": 0,
+                            "sample_count": 0,
+                            "group_ids": set(),
+                            "affected_value_element_count": 0,
+                            "modified_paths": set(),
+                            "normalizations": set(),
+                            "provenance": None,
+                        },
+                    )
+                    state["paired_response_square_sum"] += 0.5 * (
+                        negative_response * negative_response
+                        + positive_response * positive_response
+                    )
+                    state["output_support_count"] += (
+                        negative_output.support_count
+                        + positive_output.support_count
+                    )
+                    state["sample_count"] += 1
+                    if sample.group_id is not None:
+                        state["group_ids"].add(sample.group_id)
+                    state["affected_value_element_count"] += (
+                        negative.affected_value_element_count
+                        + positive.affected_value_element_count
+                    )
+                    state["modified_paths"].update(negative.modified_paths)
+                    state["modified_paths"].update(positive.modified_paths)
+                    state["normalizations"].update(
+                        {
+                            negative.normalization,
+                            positive.normalization,
+                            negative_output.normalization,
+                            positive_output.normalization,
+                        }
+                    )
+                    state["provenance"] = dict(negative.provenance)
+
+    rows: list[dict[str, Any]] = []
+    for (input_id, output_id, scale, reason), state in sorted(
+        failures.items(),
+        key=lambda item: (
+            item[0][0],
+            item[0][1],
+            item[0][2],
+            item[0][3],
+        ),
+    ):
+        rows.append(
+            {
+                **_insufficient(reason),
+                "record_kind": "input_output_sensitivity",
+                "intervened_component_id": input_id,
+                "response_component_id": output_id,
+                "scale": scale,
+                "sample_count": state["sample_count"],
+                "group_count": len(state["group_ids"]),
+            }
+        )
+    for (input_id, output_id, scale), state in sorted(summaries.items()):
+        response = math.sqrt(
+            state["paired_response_square_sum"] / state["sample_count"]
+        )
+        rows.append(
+            {
+                "status": "success",
+                "record_kind": "input_output_sensitivity",
+                "intervened_component_id": input_id,
+                "response_component_id": output_id,
+                "scale": scale,
+                "symmetric_relative_output_response": response,
+                "sample_count": state["sample_count"],
+                "group_count": len(state["group_ids"]),
+                "support_count": state["output_support_count"],
+                "direction_count": 2,
+                "affected_value_element_count": (
+                    state["affected_value_element_count"]
+                ),
+                "modified_paths": sorted(state["modified_paths"]),
+                "normalization_contracts": sorted(
+                    state["normalizations"]
+                ),
+                "perturbation_distribution": "deterministic_rademacher",
+                "perturbation_provenance": state["provenance"],
+                "aggregation": "sample_equal_paired_direction_rms",
+                "predictive_sensitivity_only": True,
+                "physical_causality_claimed": False,
+            }
+        )
+    return _execution_result(
+        "final_input_sensitivity",
+        rows or (_insufficient("empty_cohort"),),
+    )
+
+
 def _run_final_objective_conflict(
     context: AnalyzerRunContext,
 ) -> AnalyzerExecutionResult:
@@ -1191,6 +1444,7 @@ def _execution_result(
                     "node_id": row.get("node_id"),
                     "tap_id": row.get("tap_id"),
                     "method": row.get("method"),
+                    "scale": row.get("scale"),
                     "scenario_id": row.get("scenario_id"),
                     "cohort_policy": row.get("cohort_policy"),
                     "ordinal": ordinal,

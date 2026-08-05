@@ -34,7 +34,9 @@ override。hierarchy catalog、coverage gap 和调用确认状态进入 cohort/a
 训练 loss delta。
 
 最终阶段固定执行 capability 可支持的 `final_channel_influence`、
-`final_objective_conflict` 和 `final_rollout`，不提供 analyzer 选择参数。固定 cohort
+`final_input_sensitivity`、`final_objective_conflict` 和 `final_rollout`，不提供
+analyzer 选择参数。输入敏感度在同一 final cohort 上使用 task profile 声明的 scale
+和正负配对确定性扰动，只保存 input×output×scale 的对称相对输出响应。固定 cohort
 为 8 个 test window，并要求覆盖 8 个不同 group。input×output 结果按 cohort 充分统计
 收口为每个组合一行，避免持久化逐样本笛卡尔积。这些结果分别表示预测依赖、局部
 优化关系和自由滚动表现，不表示物理因果。

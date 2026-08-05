@@ -450,6 +450,125 @@ class RuntimeOutputResponse:
 
 
 @dataclass(frozen=True)
+class RuntimeInputPerturbation:
+    """保存一次隔离输入扰动分支及其实际输入差分能量。
+
+    Host Runtime 不解释输入模态。宿主负责保证 ``batch`` 只改变声明的输入
+    位置，并在声明的模型输入坐标中报告实际扰动平方和；该输入能量用于验证
+    干预执行，不作为输出相对响应的分母。portable analyzer 不读取宿主 payload。
+    """
+
+    batch: BatchEnvelope
+    input: RuntimeInputRef
+    scale: float
+    direction: int
+    input_delta_square_sum: float
+    input_support_count: int
+    affected_value_element_count: int
+    modified_paths: Sequence[str]
+    preserved_paths_verified: bool
+    normalization: str
+    provenance: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.batch, BatchEnvelope):
+            raise TypeError("batch must be BatchEnvelope")
+        if not isinstance(self.input, RuntimeInputRef):
+            raise TypeError("input must be RuntimeInputRef")
+        scale = float(self.scale)
+        if not math.isfinite(scale) or scale <= 0:
+            raise ValueError("scale must be finite and positive")
+        if int(self.direction) not in {-1, 1}:
+            raise ValueError("direction must be -1 or 1")
+        square_sum = float(self.input_delta_square_sum)
+        if not math.isfinite(square_sum) or square_sum <= 0:
+            raise ValueError(
+                "input_delta_square_sum must be finite and positive"
+            )
+        if (
+            isinstance(self.input_support_count, bool)
+            or not isinstance(self.input_support_count, int)
+            or self.input_support_count <= 0
+        ):
+            raise ValueError("input_support_count must be a positive integer")
+        if (
+            isinstance(self.affected_value_element_count, bool)
+            or not isinstance(self.affected_value_element_count, int)
+            or self.affected_value_element_count <= 0
+        ):
+            raise ValueError(
+                "affected_value_element_count must be a positive integer"
+            )
+        paths = tuple(_nonempty(path, "modified_path") for path in self.modified_paths)
+        if not paths:
+            raise ValueError("modified_paths must not be empty")
+        object.__setattr__(self, "scale", scale)
+        object.__setattr__(self, "direction", int(self.direction))
+        object.__setattr__(
+            self,
+            "input_delta_square_sum",
+            square_sum,
+        )
+        object.__setattr__(self, "modified_paths", paths)
+        object.__setattr__(
+            self,
+            "normalization",
+            _nonempty(self.normalization, "normalization"),
+        )
+        object.__setattr__(self, "provenance", _frozen_mapping(self.provenance))
+
+
+@dataclass(frozen=True)
+class RuntimeOutputPerturbation:
+    """保存同一有效 support 上的输出能量与扰动差分能量。
+
+    三个平方和必须来自相同输出坐标、validity mask 和 measurement space；
+    portable analyzer 据此计算相对于输出自身幅度的对称相对 RMS 响应。Host
+    不在这里引入训练集标准差、逐样本特征或输入扰动幅度分母。
+    """
+
+    output: RuntimeOutputRef
+    baseline_output_square_sum: float
+    condition_output_square_sum: float
+    output_difference_square_sum: float
+    support_count: int
+    normalization: str
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.output, RuntimeOutputRef):
+            raise TypeError("output must be RuntimeOutputRef")
+        square_sums = {
+            "baseline_output_square_sum": float(
+                self.baseline_output_square_sum
+            ),
+            "condition_output_square_sum": float(
+                self.condition_output_square_sum
+            ),
+            "output_difference_square_sum": float(
+                self.output_difference_square_sum
+            ),
+        }
+        for name, value in square_sums.items():
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and non-negative")
+        if (
+            isinstance(self.support_count, bool)
+            or not isinstance(self.support_count, int)
+            or self.support_count <= 0
+        ):
+            raise ValueError("support_count must be a positive integer")
+        for name, value in square_sums.items():
+            object.__setattr__(self, name, value)
+        object.__setattr__(
+            self,
+            "normalization",
+            _nonempty(self.normalization, "normalization"),
+        )
+        object.__setattr__(self, "metadata", _frozen_mapping(self.metadata))
+
+
+@dataclass(frozen=True)
 class RuntimeOutputObjective:
     """保存 actual objective ledger 中一个 output 的可微 objective slice。
 
@@ -891,6 +1010,32 @@ class OutputObjectiveCapability(Protocol):
         unit: ObjectiveUnit,
         outputs: Sequence[RuntimeOutputRef],
     ) -> Sequence[RuntimeOutputObjective]: ...
+
+
+@runtime_checkable
+class InputSensitivityCapability(Protocol):
+    """物化输入扰动和逐输出同 support 能量，不计算诊断指标。"""
+
+    scales: Sequence[float]
+
+    def perturb(
+        self,
+        *,
+        batch: BatchEnvelope,
+        input: RuntimeInputRef,
+        scale: float,
+        direction: int,
+        direction_seed: int,
+    ) -> RuntimeInputPerturbation: ...
+
+    def compare_outputs(
+        self,
+        *,
+        batch: BatchEnvelope,
+        baseline_unit: ObjectiveUnit,
+        condition_unit: ObjectiveUnit,
+        outputs: Sequence[RuntimeOutputRef],
+    ) -> Sequence[RuntimeOutputPerturbation]: ...
 
 
 @runtime_checkable

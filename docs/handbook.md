@@ -41,6 +41,14 @@ model-visible input，不在诊断侧猜测任务语义。
 input × output × method 的 cohort 均值、最小值、最大值、support 与缺失计数，不保存
 逐样本笛卡尔积。
 
+输入扰动敏感度使用 task profile 固定的多个模型输入坐标幅度。对同一个
+`sample × input`，全部尺度复用同一 Rademacher 方向并执行正负配对；只有两侧都成功的
+样本才进入 `S_ij(s)`。报告的尺度表格保留全部 input×output 组合，选择表格单元格或
+输入/输出下拉框可查看幅度—对称相对输出响应曲线。每个方向先用扰动前后输出自身的
+RMS 计算 `2×RMS(y_d-y_0)/(RMS(y_d)+RMS(y_0))`，再对正负方向和 cohort 做等样本 RMS。
+该指标范围为 0–2，不使用训练集标准差、逐 shot 特征或输入扰动 RMS 作为分母；曲线
+近似水平只表示相对响应在该尺度范围内接近不变，不能据此推断物理因果。
+
 报告按“训练过程监测 / 逐检查点异常监测 / 最终模型分析”分栏。检查点图按对象显示从
 update 0 开始的趋势；输入/模块影响以表格为主、折叠色块矩阵为补充；自由滚动按输出通道
 和 horizon 分开显示。原始数据页用于核对 support、identity、commit 与 claim boundary。

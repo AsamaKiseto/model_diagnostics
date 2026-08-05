@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from model_diagnostics.base.reporting import build_metric_guide_catalog
 from model_diagnostics.extensions import build_report_renderer_catalog
 from model_diagnostics.extensions.input_dependence import (
     ANALYZER_CATALOG as INPUT_CATALOG,
+    symmetric_relative_output_response,
 )
 from model_diagnostics.extensions.multi_objective import (
     ANALYZER_CATALOG as OBJECTIVE_CATALOG,
@@ -25,6 +27,7 @@ from model_diagnostics.extensions.rollout import (
 def test_retained_catalog_only_exposes_final_analyzers() -> None:
     assert tuple(INPUT_CATALOG.definitions) == (
         "final_channel_influence",
+        "final_input_sensitivity",
     )
     assert tuple(OBJECTIVE_CATALOG.definitions) == (
         "final_objective_conflict",
@@ -32,6 +35,7 @@ def test_retained_catalog_only_exposes_final_analyzers() -> None:
     assert tuple(ROLLOUT_CATALOG.definitions) == ("final_rollout",)
     kinds = build_report_renderer_catalog().definitions
     assert "predictive_dependence_intervention" in kinds
+    assert "predictive_input_sensitivity" in kinds
     assert "objective_gradient_geometry" in kinds
     assert "rollout_stability_and_cohort_comparison" in kinds
     paths = {
@@ -42,6 +46,22 @@ def test_retained_catalog_only_exposes_final_analyzers() -> None:
     }
     assert "joint_active_parameter_fraction" in paths
     assert "effective_supervision_coverage" not in paths
+    assert "symmetric_relative_output_response" in paths
+
+
+def test_symmetric_relative_output_response_uses_output_self_scale() -> None:
+    assert symmetric_relative_output_response(
+        baseline_output_square_sum=2.0,
+        condition_output_square_sum=8.0,
+        output_difference_square_sum=2.0,
+        support_count=2,
+    ) == pytest.approx(2.0 / 3.0)
+    assert symmetric_relative_output_response(
+        baseline_output_square_sum=0.0,
+        condition_output_square_sum=0.0,
+        output_difference_square_sum=0.0,
+        support_count=2,
+    ) == 0.0
 
 
 def test_final_objective_conflict_reports_opposite_gradients() -> None:

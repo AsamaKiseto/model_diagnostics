@@ -15,8 +15,9 @@
 - `base/artifacts` 拥有跨执行路径的标准库原语、writer、transaction 与 validator。
 - `base/reporting` 独占统一报告与 HTML renderer；runtime、checkpoint 和 extensions 不复制报告实现。
 - 当前生产 catalog 只保留 `checkpoint_sweep`、`final_module_influence`、
-  `final_channel_influence`、`final_objective_conflict` 和 `final_rollout`；批量
-  checkpoint 与 final-selected analyzer 必须互斥。
+  `final_channel_influence`、`final_input_sensitivity`、
+  `final_objective_conflict` 和 `final_rollout`；批量 checkpoint 与
+  final-selected analyzer 必须互斥。
 - artifact wire-format identity 与 Python import path 分离；package 迁移不得隐式改变 v2 digest 或 format identity。
 - portable 回归只放在 `model_diagnostics/tests/`，并由本目录的 `pytest.ini` 独立收集；
   测试同样禁止 import `src.*` 或宿主 fixture。
