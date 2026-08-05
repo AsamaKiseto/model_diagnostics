@@ -128,6 +128,9 @@ manual gradient sync；具体解释归同步服务。单进程默认使用
 - `OutputObjectiveCapability` 从 actual objective ledger 提取逐 output 的可微
   objective slice，并保留 objective identity、support、normalization、partition
   status 与 coverage。
+- `InputSensitivityCapability` 隔离一个显式 input 的尺度扰动，并从未扰动/扰动两次
+  output 预测中返回同一 validity/support 上的 baseline、condition 和差分平方和。
+  它不执行模型，也不计算 `S_ij`；输入差分能量只用于核对干预执行，不进入指标分母。
 
 `RuntimeComponentRef.component_id` 标识一次执行中的具体输入或输出位置，
 `semantic_id` 连接语义相同但位置不同的 component；`display_label` 只用于展示，不参与

@@ -20,7 +20,8 @@ Base checkpoint protocol，并按显式 capability 组合 analyzer；它不选�
 `extensions` 只保留最终
 checkpoint 使用的三类算法：
 
-- `input_dependence`：identity/mean replacement 的输入×输出响应；
+- `input_dependence`：identity/mean replacement 的输入×输出响应，以及多尺度正负配对
+  扰动的对称相对输出响应；
 - `multi_objective`：输出目标与其余目标的整体梯度 cosine、norm ratio 和分区校验；
 - `rollout`：显式 free rollout trace 的误差与局部失稳统计。
 

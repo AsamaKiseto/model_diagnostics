@@ -53,6 +53,7 @@ scenario、capability descriptor、sample/group identity。它们由 Host Runtim
 | `checkpoint_sweep` | 逐 checkpoint | 输出响应/直接输出梯度、objective、参数叶子层梯度、Activation/Norm 分布 |
 | `final_module_influence` | final | runtime-confirmed Stage/Block 的 local Taylor 与 identity/scale-zero/mean-patch 输出响应 |
 | `final_channel_influence` | final | identity/mean replacement 的 input×output 响应 |
+| `final_input_sensitivity` | final | 多尺度正负配对扰动的 input×output 对称相对输出响应 |
 | `final_objective_conflict` | final | objective A 与 complement 的 model-wide 梯度关系 |
 | `final_rollout` | final | 显式 scenario 的 free rollout 稳定性 |
 
@@ -69,6 +70,7 @@ scenario、capability descriptor、sample/group identity。它们由 Host Runtim
 | sweep cohort | test 32 个 window，至少 8 个 group，确定性分层 |
 | final cohort | test 8 个 window、8 个不同 group，确定性分层 |
 | module mean reference | train 8 个 window、8 个不同 group，response-only |
+| input sensitivity | task profile 声明 scale；同一方向的正负配对；final cohort |
 | 分布观测 | 全部 Activation/Norm 输入与输出 |
 | objective partition tolerance | `1e-6` |
 | rollout local slope | `min(20, horizon)`，下限 2 |
@@ -104,6 +106,9 @@ scenario、capability descriptor、sample/group identity。它们由 Host Runtim
 | output target list | 任务事实 | Host capability 枚举全部 objective output |
 | input replacement method | 固定 | identity 与 training mean replacement |
 | input×output 持久化 | 固定 | 每个 input×output×method 保存 cohort 均值、范围、support、干预元素范围、样本缺失与路径隔离核对 |
+| input sensitivity scale | 任务事实 | 由 task profile 声明模型输入坐标中的多个扰动幅度，诊断侧不可覆盖 |
+| input sensitivity direction | 固定 | 同一 sample×input 在所有尺度复用同一确定性 Rademacher 方向，并执行正负配对 |
+| input sensitivity metric | 固定 | 每个方向先计算 `2×RMS(y_d-y_0)/(RMS(y_d)+RMS(y_0))`，再对正负方向与 cohort 做等样本 RMS；只保存 `symmetric_relative_output_response` 与必要 support/provenance |
 | donor/permutation/matching/kNN 参数 | 删除 | 当前精简系统不执行 donor 或 permutation |
 | objective identity/schedule/cap/divisor/AMP/precision | 运行事实 | 必须复用真实 checkpoint objective，不允许诊断侧覆盖 |
 | objective partition tolerance | 固定 | `1e-6 × (1 + abs(training objective))` |
@@ -119,6 +124,7 @@ scenario、capability descriptor、sample/group identity。它们由 Host Runtim
 | overlapping trend rendering | 固定 | 数值完全重合的曲线使用不同颜色和线型叠加，并在图下注明重合数量 |
 | final analysis loading | 固定 | 通道、模块、目标关系和 rollout 按功能分页；只加载当前页 |
 | input/module influence view | 固定 | 全部组合进入可筛选分页列表，每页 100 行；色块矩阵仅在展开补充证据时创建 |
+| input sensitivity view | 固定 | scale 可切换的完整 `S_ij` 表格与指定 input/output 的尺度—增益曲线；全部 scale 共用色阶 |
 | objective relationship view | 固定 | 每个输出一行，同时展示 cosine、norm ratio、partition coverage 和共同活跃参数比例；support 进入悬停 |
 | final rollout channel view | 固定 | 选择输出通道和 RMSE/sRMSE 汇总口径；各显式 horizon 分面展示原始尺度 mean–q90 时间曲线 |
 | final rollout overview | 固定 | 全部输出通道按 horizon 对齐展示 RMSE、sRMSE、最大局部斜率和 episode 数；相同指标跨 horizon 共用色阶 |

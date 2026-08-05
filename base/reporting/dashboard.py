@@ -29,12 +29,13 @@ button,input,select{font:inherit;color:var(--ink);background:var(--panel);border
 .metric-meta{font-size:12px;color:var(--muted);margin-top:6px}.chart-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0 2px}.chart-controls[hidden]{display:none!important}.chart-controls select{min-width:180px;flex:1}.metric-panel details{margin-top:8px}.metric-panel dl{display:grid;grid-template-columns:78px 1fr;gap:6px 8px;font-size:12px}.metric-panel dt{color:var(--muted);font-weight:700}.metric-panel dd{margin:0}
 .purpose-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;padding-bottom:10px;border-bottom:1px solid var(--line)}.purpose-tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:#fff}.purpose-tab-host{min-height:220px}.influence-list{margin-top:10px}.influence-list .toolbar{position:sticky;top:0;z-index:2;background:var(--panel);padding:4px 0}.influence-list .toolbar input{min-width:240px;flex:1}.influence-list .toolbar select{min-width:150px;max-width:360px}.influence-list td.effect-positive{color:#b45309;font-weight:700}.influence-list td.effect-negative{color:#047857;font-weight:700}.influence-summary{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;color:var(--muted);font-size:12px}.influence-summary span{padding:4px 7px;border-radius:999px;background:var(--soft)}
 .secondary{margin-top:15px}.secondary>summary{cursor:pointer;font-weight:700}.support-details{padding-top:12px;border-top:1px dashed var(--line)}.support-details>summary{display:list-item}.support-details .chart-grid{margin-top:12px}.support-note{max-width:1100px;margin:7px 0 0}.supplementary-group{padding:12px 0;border-top:1px dashed var(--line)}.supplementary-group:first-of-type{border-top:0}.supplementary-group h4{margin:0 0 4px}.detail-chart-host{margin-top:10px}.empty{padding:32px 12px;color:var(--muted);text-align:center;border:1px dashed var(--line);border-radius:10px}
+.sensitivity-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(420px,.65fr);gap:12px;margin-top:10px;align-items:start}.sensitivity-pane{min-width:0}.sensitivity-pane h4{margin:0 0 6px}.sensitivity-table{max-height:720px}.sensitivity-table th:first-child,.sensitivity-table td:first-child{position:sticky;left:0;background:var(--panel);z-index:2}.sensitivity-table th:first-child{z-index:3}.sensitivity-table td[data-sensitivity-cell]{cursor:pointer;text-align:right;font-weight:650}.sensitivity-table td[data-sensitivity-cell]:hover{outline:2px solid var(--accent);outline-offset:-2px}.sensitivity-table td.selected{outline:3px solid var(--accent);outline-offset:-3px}.sensitivity-curve svg{min-height:360px}
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;align-items:center}.toolbar select{max-width:min(720px,100%);flex:1}.table{overflow:auto;max-height:650px;border:1px solid var(--line);border-radius:9px}
 table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:12px}th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;max-width:440px;overflow:hidden;text-overflow:ellipsis}th{position:sticky;top:0;background:var(--panel);z-index:1}tr:hover{background:var(--soft)}
 .contracts{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:9px}.contract{border:1px solid var(--line);border-radius:9px;padding:11px}.boundary{padding-left:18px;font-size:12px}
 .tree{display:grid;gap:5px}.tree div{padding:6px 9px;border-left:3px solid var(--accent);background:var(--soft);margin-left:calc(var(--depth)*18px)}pre{white-space:pre-wrap;word-break:break-word;max-height:30rem;overflow:auto}
 dialog{width:min(96vw,1700px);height:min(94vh,1100px);padding:0;border:1px solid var(--line);border-radius:13px;background:var(--panel);color:var(--ink)}dialog::backdrop{background:#000a}.zoom-toolbar{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:2}.zoom-toolbar strong{margin-right:auto}.zoom-axis-control{display:flex;align-items:center;gap:6px}.zoom-axis-control[hidden]{display:none}.zoom-axis-control select{padding:6px 8px}.zoom-viewport{height:calc(100% - 58px);overflow:auto;background:var(--bg);cursor:grab}.zoom-viewport.dragging{cursor:grabbing}.zoom-content{width:1400px;transform-origin:0 0;padding:20px}.zoom-content svg{display:block;width:1360px;max-height:none;height:auto;background:var(--panel)}
-@media(max-width:900px){.chart-grid{grid-template-columns:1fr}.metric-panel.layout-full{grid-column:1}.section-head{display:block}.support{margin-top:6px}.metric-head{display:block}.metric-head code{display:block;max-width:none;margin-top:5px;text-align:left}}
+@media(max-width:1100px){.sensitivity-layout{grid-template-columns:1fr}}@media(max-width:900px){.chart-grid{grid-template-columns:1fr}.metric-panel.layout-full{grid-column:1}.section-head{display:block}.support{margin-top:6px}.metric-head{display:block}.metric-head code{display:block;max-width:none;margin-top:5px;text-align:left}}
 </style>
 </head>
 <body><main>
@@ -70,7 +71,7 @@ __PAYLOAD_ELEMENTS__
 <script>
 "use strict";
 const BOOT=JSON.parse(document.getElementById("boot").textContent),CACHE=new Map(),PENDING=new Map();
-const COMPONENTS_BY_SCOPE=new Map(Object.entries(BOOT.component_catalogs||{}).map(([scope,catalog])=>{const components=Array.isArray(catalog.components)?catalog.components:[];const byId=new Map(components.map(component=>{const label=String(component.display_label||`channel ${component.component_index??"?"}`),group=String(component.component_group||"").trim(),index=component.component_index,qualified=group?(label===group?`${group} / channel ${index??"?"}`:`${group} / ${label}`):label;return[String(component.component_id),{...component,display:qualified}]}));return[scope,byId]}));
+const COMPONENTS_BY_SCOPE=new Map(Object.entries(BOOT.component_catalogs||{}).map(([scope,catalog])=>{const components=Array.isArray(catalog.components)?catalog.components:[];const byId=new Map(components.map(component=>{const label=String(component.display_label||`channel ${component.component_index??"?"}`),group=String(component.component_group||"").trim(),index=component.component_index,segment=String(component.metadata?.segment||"").trim(),segmentLabels={history:"历史输入",target:"预测窗口输入",rollout:"滚动窗口输入"},base=group?(label===group?`${group} / channel ${index??"?"}`:`${group} / ${label}`):label,qualified=component.component_kind==="input"&&segment?`${segmentLabels[segment]||segment} / ${base}`:base;return[String(component.component_id),{...component,display:qualified}]}));return[scope,byId]}));
 const COLORS=["var(--viz-1)","var(--viz-2)","var(--viz-3)","var(--viz-4)","var(--viz-5)","var(--viz-6)","var(--viz-7)","var(--viz-8)"],SCALE_COLORS=["var(--scale-1)","var(--scale-2)","var(--scale-3)","var(--scale-4)","var(--scale-5)"];
 const CHART={width:1000,height:430,left:96,right:28,top:68,bottom:92};
 const SECTIONS=[
@@ -99,6 +100,7 @@ const METRIC_LABELS={
   norm_ratio:"梯度范数比",
   partition_coverage:"目标分区覆盖率",
   joint_active_parameter_fraction:"共同活跃参数比例",
+  symmetric_relative_output_response:"对称相对输出响应",
   rmse:"RMSE",
   srmse:"sRMSE",
   rolling_local_slope_max:"局部误差斜率最大值",
@@ -307,6 +309,7 @@ PURPOSES.checkpoint=[
 ];
 PURPOSES.final=[
   {id:"channel",title:"输入通道对输出通道的影响",description:"在相同样本和输出指标下，只替换一个输入通道，再与未替换的基线比较。effect_value 已统一方向：正值表示替换后输出指标变差，负值表示改善。列表给出全部输入×输出组合，色块矩阵用于概览；它反映模型在该干预下的预测依赖，不表示物理因果。",categories:["input"],paths:["effect_value","normalized_effect"]},
+  {id:"sensitivity",title:"输入扰动敏感度",description:"对每个输入通道在模型实际输入坐标中施加多个幅度的正负配对扰动，以扰动前后输出自身的 RMS 作为相对尺度。尺度表格用于查看完整 Sij，曲线用于查看指定输入—输出组合的相对响应如何随扰动幅度变化；它描述模型预测敏感度，不表示物理因果。",categories:["input"],paths:["symmetric_relative_output_response"]},
   {id:"module",title:"Stage/Block 对输出通道的影响",description:"分析 final cohort 上经 3–8 次成功 forward 确认的通用 Stage/Block，以及宿主增量 override。对同一样本分别运行基线和模块干预，effect_value 正值表示输出指标变差，负值表示改善。相对响应放在补充证据，真实逐输出干预与局部 Taylor 分开展示。",categories:["module"],paths:["effect_value","normalized_effect","objective_normalized_local_taylor"]},
   {id:"objective",title:"输出目标之间的优化关系",description:"比较每个输出目标与其余目标的梯度余弦、范数比，并同时核对目标分区和共同活跃参数覆盖。有效监督 support 在单元格悬停和原始记录中核对。它只描述最终参数点附近的一阶优化关系。",categories:["multi_objective"],paths:["gradient_cosine","norm_ratio","partition_coverage","joint_active_parameter_fraction"]},
   {id:"rollout",title:"最终模型的自由滚动表现",description:"只运行显式配置的 free rollout。先选择输出通道，再查看该通道随时间步变化的均值与 q90 尾部误差，避免把全部通道叠成不可读曲线。",categories:["rollout"],paths:["rmse","srmse","timestep_mean_absolute_error","timestep_q90_absolute_error","rolling_local_slope_max","unstable_episode_count","time_to_threshold_median"]}
@@ -315,6 +318,7 @@ PURPOSES.final=[
 // 仍保留在 artifact 和下钻清单中，避免把“保留证据”误写成“一字段一张图”。
 const DIRECTION_PATHS=new Set([
   "effect_value",
+  "symmetric_relative_output_response",
   "response_value",
   "raw_objective",
   "backward_objective",
@@ -365,6 +369,9 @@ const COMPOSITE_VIEWS={
   "final.objective":[
     {kind:"objective_overview",title:"各输出目标的梯度关系",paths:["gradient_cosine","norm_ratio","partition_coverage","joint_active_parameter_fraction"]}
   ],
+  "final.sensitivity":[
+    {kind:"input_sensitivity",title:"多尺度输入—输出敏感度",paths:["symmetric_relative_output_response"]}
+  ],
   "final.rollout":[
     {kind:"rollout_overview",title:"各预测长度的自由闭环滚动表现",paths:["rmse","srmse","rolling_local_slope_max","unstable_episode_count","time_to_threshold_median","timestep_mean_absolute_error","timestep_q90_absolute_error"]},
     {kind:"rollout_heatmap",title:"全部输出通道的滚动指标概览",paths:["rmse","srmse","rolling_local_slope_max","unstable_episode_count"]},
@@ -375,7 +382,7 @@ const DIMENSIONS={
   training:["update","checkpoint_update","response_component_id","node_id","module_path"],
   module:["update","response_component_id","module_site_id","__condition__","node_id","module_path","branch","sample_id","invocation_index"],
   parameter:["update","__condition__","node_id","module_path","sample_id"],
-  input:["response_component_id","intervened_component_id","__condition__","sample_id","group_id","position"],
+  input:["scale","response_component_id","intervened_component_id","__condition__","sample_id","group_id","position"],
   multi_objective:["response_component_id","scope","node_id","module_path","group_id","sample_id"],
   rollout:["timestep","horizon","rollout_condition_id","scenario_id","response_component_id","sample_id","position"],
   runtime:["update","node_id","module_path","rank"],
@@ -495,7 +502,7 @@ function sourceSupportsGuide(source,guide){if(!source.numeric_paths.some(path=>p
 function guideSources(guide){const candidates=STREAMS.filter(source=>sourceSupportsGuide(source,guide)),online=candidates.filter(source=>source.group==="online"),checkpoint=candidates.filter(source=>source.group==="checkpoint");if(!checkpoint.length)return online;const byScope=new Map();checkpoint.forEach(source=>{const scope=String(source.scope_id||source.name);if(!byScope.has(scope))byScope.set(scope,[]);byScope.get(scope).push(source)});const selected=[...byScope.values()].sort((left,right)=>right.reduce((total,source)=>total+Number(source.row_count||0),0)-left.reduce((total,source)=>total+Number(source.row_count||0),0))[0]||[];return[...online,...selected]}
 const guideAvailable=guide=>guideSources(guide).length>0;
 const CHECKPOINT_EVIDENCE_KINDS=new Set(["checkpoint_training_health"]);
-const FINAL_EVIDENCE_KINDS=new Set(["checkpoint_conditioned_activation_intervention","predictive_dependence_intervention","objective_gradient_geometry","rollout_stability_and_cohort_comparison"]);
+const FINAL_EVIDENCE_KINDS=new Set(["checkpoint_conditioned_activation_intervention","predictive_dependence_intervention","predictive_input_sensitivity","objective_gradient_geometry","rollout_stability_and_cohort_comparison"]);
 function purposePathSet(section){return new Set((PURPOSES[section]||[]).flatMap(item=>item.paths||[]))}
 function guidesForSection(category){if(category==="training"){const paths=purposePathSet("training");return GUIDES.filter(guide=>!guide.evidence_kind&&paths.has(guide.path))}if(category==="checkpoint")return GUIDES.filter(guide=>CHECKPOINT_EVIDENCE_KINDS.has(guide.evidence_kind));if(category==="final")return GUIDES.filter(guide=>FINAL_EVIDENCE_KINDS.has(guide.evidence_kind));return GUIDES.filter(guide=>guide.category===category)}
 function categoryState(category){const guides=guidesForSection(category),available=guides.filter(guideAvailable).length,kinds=unique(guides.map(guide=>guide.evidence_kind).filter(Boolean)),executed=kinds.some(kind=>EXECUTED_KINDS.has(kind));if(available)return{label:"已有数据",kind:"available",available,total:guides.length,kinds};if(kinds.length&&!executed)return{label:"未运行",kind:"not_run",available:0,total:guides.length,kinds};return{label:"无可用证据",kind:"no_evidence",available:0,total:guides.length,kinds}}
@@ -848,8 +855,48 @@ async function renderMetricPanel(guide,host,token,purpose,mode="direction"){
     panel.querySelector(".metric-meta").innerHTML=`<span class="error">${esc(error.message||error)}</span>`;
   }
 }
+
+function sensitivityRecords(observations){
+  return observations.map(item=>({item,input:String(dimensionValue(item.row,"intervened_component_id")??"未命名输入"),output:String(dimensionValue(item.row,"response_component_id")??"未命名输出"),scale:Number(dimensionValue(item.row,"scale")),value:Number(item.value)})).filter(record=>Number.isFinite(record.scale)&&Number.isFinite(record.value));
+}
+
+async function renderInputSensitivityPanel(view,guides,host,token,purpose){
+  // 固定矩阵和尺度曲线共享同一批记录，不根据数据形态切换图形。
+  const guide=displayGuide(guides[0]),id=`sensitivity-${Math.random().toString(36).slice(2)}`;
+  host.insertAdjacentHTML("beforeend",`<article id="${id}" class="metric-panel layout-full layout-expanded"><div class="metric-head"><div><span class="badge">${esc(localizeProse(purpose.title))}</span><h3>${esc(localizeProse(view.title))}</h3></div></div><div class="chart-controls"><label>扰动幅度</label><select data-role="scale" aria-label="选择扰动幅度"></select></div><div class="sensitivity-layout"><section class="sensitivity-pane"><h4>输入通道 × 输出通道的 S<sub>ij</sub></h4><p class="muted">色阶固定为理论范围 0–2；点击单元格可同步选择右侧曲线。</p><div data-role="matrix" class="table sensitivity-table"></div></section><section class="sensitivity-pane sensitivity-curve"><h4>扰动幅度—相对响应曲线</h4><div class="chart-controls"><label>输入通道</label><select data-role="input"></select><label>输出通道</label><select data-role="output"></select></div><div class="chart-viewport"><svg viewBox="0 0 1000 430" role="img" aria-label="扰动幅度与对称相对输出响应"></svg></div></section></div><div class="metric-meta">正在加载多尺度敏感度证据。</div>${guideDetails(guide)}</article>`);
+  const panel=document.getElementById(id),scaleSelector=panel.querySelector('[data-role="scale"]'),inputSelector=panel.querySelector('[data-role="input"]'),outputSelector=panel.querySelector('[data-role="output"]'),matrixHost=panel.querySelector('[data-role="matrix"]'),svg=panel.querySelector("svg"),meta=panel.querySelector(".metric-meta");
+  try{
+    const observations=await observationsForGuide(guides[0]);
+    if(token!==renderToken)return;
+    const records=sensitivityRecords(observations),scales=unique(records.map(record=>record.scale)).sort((a,b)=>a-b),inputs=unique(records.map(record=>record.input)).sort((a,b)=>a.localeCompare(b,"zh-CN",{numeric:true})),outputs=unique(records.map(record=>record.output)).sort((a,b)=>a.localeCompare(b,"zh-CN",{numeric:true})),magnitude=2,cells=new Map();
+    records.forEach(record=>{const key=`${record.scale}\u0000${record.input}\u0000${record.output}`;if(!cells.has(key))cells.set(key,[]);cells.get(key).push(record)});
+    scaleSelector.innerHTML=scales.map(value=>`<option value="${value}">${esc(formatTick(value))}</option>`).join("");
+    inputSelector.innerHTML=inputs.map((value,index)=>`<option value="${index}">${esc(value)}</option>`).join("");
+    outputSelector.innerHTML=outputs.map((value,index)=>`<option value="${index}">${esc(value)}</option>`).join("");
+    const drawCurve=()=>{
+      const input=inputs[Number(inputSelector.value)]??inputs[0],output=outputs[Number(outputSelector.value)]??outputs[0],curve=records.filter(record=>record.input===input&&record.output===output).map(record=>({value:record.value,x:record.scale,group:`${input} → ${output}`,item:record.item}));
+      const result=drawTrendRecords(svg,guide,curve,"scale","linear");
+      meta.textContent=`${records.length.toLocaleString()} 个有限组合 · ${scales.length} 个扰动尺度 · ${inputs.length} 个输入通道 · ${outputs.length} 个输出通道 · 当前曲线 ${result.support} 个点`;
+    };
+    const drawMatrix=()=>{
+      const scale=Number(scaleSelector.value),rows=inputs.map((input,inputIndex)=>`<tr><th title="${esc(input)}">${esc(input)}</th>${outputs.map((output,outputIndex)=>{const values=(cells.get(`${scale}\u0000${input}\u0000${output}`)||[]).map(record=>record.value),value=values.length?values.reduce((total,item)=>total+item,0)/values.length:null,selected=inputIndex===Number(inputSelector.value)&&outputIndex===Number(outputSelector.value);return value==null?'<td>—</td>':`<td data-sensitivity-cell data-input-index="${inputIndex}" data-output-index="${outputIndex}" class="${selected?"selected":""}" style="background:${matrixColor(value,magnitude,false)}" title="输入：${esc(input)}&#10;输出：${esc(output)}&#10;尺度：${esc(formatTick(scale))}&#10;Sij：${esc(formatTick(value))}">${esc(formatTick(value))}</td>`}).join("")}</tr>`).join("");
+      matrixHost.innerHTML=`<table><thead><tr><th>输入通道</th>${outputs.map(output=>`<th title="${esc(output)}">${esc(output)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`;
+      matrixHost.querySelectorAll("[data-sensitivity-cell]").forEach(cell=>cell.onclick=()=>{inputSelector.value=cell.dataset.inputIndex;outputSelector.value=cell.dataset.outputIndex;drawMatrix();drawCurve()});
+    };
+    const redrawSelection=()=>{drawMatrix();drawCurve()};
+    scaleSelector.onchange=drawMatrix;
+    inputSelector.onchange=redrawSelection;
+    outputSelector.onchange=redrawSelection;
+    drawMatrix();
+    drawCurve();
+    bindZoom(panel,"扰动幅度与对称相对输出响应");
+  }catch(error){
+    meta.innerHTML=`<span class="error">${esc(error.message||error)}</span>`;
+  }
+}
 // 组合视图统一占满一行；rollout 详情选择输出与汇总尺度，各 horizon 始终分面展示。
 async function renderCompositePanel(view,guides,host,token,purpose){
+  if(view.kind==="input_sensitivity")return renderInputSensitivityPanel(view,guides,host,token,purpose);
   const localizedGuides=guides.map(displayGuide),id=`composite-${Math.random().toString(36).slice(2)}`,title=localizeProse(view.kind==="trend"&&localizedGuides.length===1?localizedGuides[0].label:view.title),controlId=`${id}-controls`;
   const controls=view.kind==="rollout_overview"?`<div id="${controlId}" class="chart-controls" hidden><label>输出通道</label><select data-role="output" aria-label="选择输出通道"></select><label>汇总误差指标</label><select data-role="summary-metric" aria-label="选择 RMSE 或 sRMSE"><option value="rmse">RMSE</option><option value="srmse">sRMSE</option></select></div>`:"",expanded=["rollout_overview","rollout_heatmap","objective_overview"].includes(view.kind)?"layout-expanded":"";
   host.insertAdjacentHTML("beforeend",`<article class="metric-panel layout-full ${expanded}"><div class="metric-head"><div><span class="badge">${esc(localizeProse(purpose.title))}</span><h3>${esc(title)}</h3></div></div>${controls}<div class="chart-viewport"><svg id="${id}" viewBox="0 0 1000 430" role="img" aria-label="${esc(title)}"></svg></div><div class="metric-meta">正在组合同一诊断目的的证据。</div><details><summary>本图使用的证据</summary><dl>${localizedGuides.map(guide=>`<dt>${esc(guide.label)}</dt><dd>${esc(guide.description)}</dd>`).join("")}</dl></details></article>`);

@@ -682,6 +682,8 @@ def test_base_checkpoint_runs_identity_and_scale_conditions_on_arbitrary_file(
     assert 'class="chart-viewport"' in dashboard
     assert 'kind:"objective_overview"' in dashboard
     assert 'kind:"rollout_overview"' in dashboard
+    assert 'kind:"input_sensitivity"' in dashboard
+    assert "扰动幅度—相对响应曲线" in dashboard
     assert 'kind:"rollout_heatmap"' in dashboard
     assert 'kind:"rollout_coverage"' in dashboard
     assert "预测 ${horizon} 步" in dashboard
