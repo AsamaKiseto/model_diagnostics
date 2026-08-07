@@ -103,6 +103,7 @@ class _ToyAdapter:
         self.analyzer_calls: list[dict[str, Any]] = []
         self.module_site_call_count = 0
         self.objective_call_count = 0
+        self.objective_call_modes: list[tuple[bool, bool]] = []
         self.alternate_objective_identity = False
         self.vector_objective = False
         self.vector_cotangent = False
@@ -235,7 +236,10 @@ class _ToyAdapter:
         precision: str,
         return_aux: bool,
     ) -> ObjectiveResult:
-        del objective, precision, return_aux
+        del precision, return_aux
+        self.objective_call_modes.append(
+            (bool(objective.get("response_only")), loaded.model.training)
+        )
         prediction = loaded.model(payload["features"])
         squared_error = torch.square(prediction - payload["label"])
         loss = squared_error if self.vector_objective else squared_error.mean()
@@ -621,6 +625,16 @@ def test_base_checkpoint_runs_identity_and_scale_conditions_on_arbitrary_file(
     # 每个样本执行一次 Taylor baseline、一次 response baseline 和三个干预。
     assert adapter.objective_call_count == 2 * (2 + 3)
     assert all(
+        not training
+        for response_only, training in adapter.objective_call_modes
+        if response_only
+    )
+    assert all(
+        training
+        for response_only, training in adapter.objective_call_modes
+        if not response_only
+    )
+    assert all(
         row["predictive_dependence_only"] is True
         and row["physical_causality_claimed"] is False
         for row in module_response_rows
@@ -683,16 +697,34 @@ def test_base_checkpoint_runs_identity_and_scale_conditions_on_arbitrary_file(
     assert 'kind:"objective_overview"' in dashboard
     assert 'kind:"rollout_overview"' in dashboard
     assert 'kind:"input_sensitivity"' in dashboard
+    assert "uniqueNumbers" in dashboard
+    assert "scales=uniqueNumbers(records.map" in dashboard
     assert "扰动幅度—相对响应曲线" in dashboard
     assert 'kind:"rollout_heatmap"' in dashboard
     assert 'kind:"rollout_coverage"' in dashboard
+    assert 'kind:"objective_terms"' in dashboard
+    assert "Loss Components" in dashboard
+    assert "Per-Output Loss" in dashboard
+    assert "Global Gradient Norm" in dashboard
+    assert "Named loss" not in dashboard
+    assert "function hierarchyLevel" in dashboard
+    assert 'data-filter="level"' in dashboard
+    assert 'data-filter="object"' in dashboard
+    assert "Stage/Block coverage" in dashboard
+    assert "高密度训练趋势只保留整条曲线悬停" in dashboard
+    assert 'id="zoom-chart-tooltip"' in dashboard
+    assert 'svg.closest("dialog")?ZOOM_CHART_TOOLTIP:CHART_TOOLTIP' in dashboard
+    assert 'if(guide.category==="training")return"layout-full"' in dashboard
     assert "预测 ${horizon} 步" in dashboard
     assert "汇总误差指标" in dashboard
-    assert "滚动样本覆盖与缺失原因" in dashboard
-    assert "有限记录 / 全部记录" in dashboard
-    assert "有效输出元素" in dashboard
-    assert "改动元素（实际/计划）" in dashboard
-    assert "未干预路径核对" in dashboard
+    assert "Rollout Cohort Coverage" in dashboard
+    assert "恒等对照平均响应" in dashboard
+    assert "恒等对照响应范围" in dashboard
+    assert "查看缺失与有效性核对" in dashboard
+    assert "全部原始字段仍保留在 artifact" in dashboard
+    assert 'data-filter="type"' not in dashboard
+    assert "有限记录/全部记录" not in dashboard
+    assert "改动元素（实际/计划）" not in dashboard
     assert "共同活跃参数比例" in dashboard
 
 

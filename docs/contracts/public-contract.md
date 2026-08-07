@@ -52,7 +52,7 @@ scenario、capability descriptor、sample/group identity。它们由 Host Runtim
 |---|---|---|
 | `checkpoint_sweep` | 逐 checkpoint | 输出响应/直接输出梯度、objective、参数叶子层梯度、Activation/Norm 分布 |
 | `final_module_influence` | final | runtime-confirmed Stage/Block 的 local Taylor 与 identity/scale-zero/mean-patch 输出响应 |
-| `final_channel_influence` | final | identity/mean replacement 的 input×output 响应 |
+| `final_channel_influence` | final | output 级重复前向恒等对照与 mean replacement 的 input×output 响应 |
 | `final_input_sensitivity` | final | 多尺度正负配对扰动的 input×output 对称相对输出响应 |
 | `final_objective_conflict` | final | objective A 与 complement 的 model-wide 梯度关系 |
 | `final_rollout` | final | 显式 scenario 的 free rollout 稳定性 |
@@ -104,8 +104,8 @@ scenario、capability descriptor、sample/group identity。它们由 Host Runtim
 | module intervention method/scale | 固定 | identity、`output_scale=0`、training mean patch |
 | input target list | 任务事实 | Host capability 枚举全部 model-visible input |
 | output target list | 任务事实 | Host capability 枚举全部 objective output |
-| input replacement method | 固定 | identity 与 training mean replacement |
-| input×output 持久化 | 固定 | 每个 input×output×method 保存 cohort 均值、范围、support、干预元素范围、样本缺失与路径隔离核对 |
+| input replacement method | 固定 | training mean replacement；恒等对照是不改变 input 的重复前向，不作为 replacement 方法枚举 |
+| input×output 持久化 | 固定 | 每个 output 保存一次 cohort 恒等对照均值/范围；每个 input×output 保存 mean replacement 的 cohort 均值、范围、support、干预元素范围、样本缺失与路径隔离核对 |
 | input sensitivity scale | 任务事实 | 由 task profile 声明模型输入坐标中的多个扰动幅度，诊断侧不可覆盖 |
 | input sensitivity direction | 固定 | 同一 sample×input 在所有尺度复用同一确定性 Rademacher 方向，并执行正负配对 |
 | input sensitivity metric | 固定 | 每个方向先计算 `2×RMS(y_d-y_0)/(RMS(y_d)+RMS(y_0))`，再对正负方向与 cohort 做等样本 RMS；只保存 `symmetric_relative_output_response` 与必要 support/provenance |

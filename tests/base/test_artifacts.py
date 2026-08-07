@@ -237,8 +237,8 @@ def test_report_summarizes_failure_without_embedding_attachments(
     assert "训练过程监测" in document
     assert "逐检查点异常监测" in document
     assert "最终模型分析" in document
-    assert "输入通道对输出通道的影响" in document
-    assert "Stage/Block 对输出通道的影响" in document
+    assert "Input-to-Output Influence" in document
+    assert "Stage/Block Influence" in document
     assert 'categories:["input"]' in document
     assert 'categories:["module"]' in document
     assert "选择输出通道" in document
@@ -532,7 +532,7 @@ def test_report_is_always_one_self_contained_html(
     assert "rolloutExclusionSummary" in standalone
     assert "grid-template-columns:repeat(2,minmax(0,1fr))" in standalone
     assert "tall-chart" not in standalone
-    assert "查看色块影响矩阵" in standalone
+    assert "查看当前筛选的色块影响矩阵" in standalone
     assert "purpose-tabs" in standalone
     assert "drawInfluenceList" in standalone
 

@@ -365,10 +365,10 @@ BASE_ANALYZER_CATALOG = AnalyzerCatalog(
             evidence_kind="checkpoint_conditioned_activation_intervention",
             execution_mode="condition",
             option_keys=frozenset(),
-            definition_version=2,
+            definition_version=3,
             claim_boundaries=(
                 "local Taylor is a local first-order approximation",
-                "module intervention effects use response-only evaluation and are not training-loss deltas or physical causality",
+                "module intervention effects use eval-mode response-only evaluation and are not training-loss deltas or physical causality",
             ),
         )
     }
