@@ -45,6 +45,9 @@ checkpoint 分支的 objective defaults 与 execution precision 使用类型化
 训练位置使用 `CheckpointState.training_provenance:
 CheckpointTrainingProvenance | None`。opaque `metadata` 不承载这两项隐式协议，generic
 consumer 不得从 metadata 猜 objective、device 或训练位置。
+`ModelSpec` 同时是 model construction 的完整兼容 identity；所有会改变模型结构或构造后
+执行语义的字段必须进入其 `model_id/config/metadata`。`build_payload` 可以传递已解析的
+checkpoint 对象或其它构造材料，但不得隐匿 `ModelSpec` 未声明的兼容性差异。
 当前 provenance 只表达单个训练段内的 `local_completed_update / training_updates`
 及其 objective 坐标；段间 checkpoint relay 不合并或继承全局训练进度。
 

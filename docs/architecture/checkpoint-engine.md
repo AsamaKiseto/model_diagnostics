@@ -15,6 +15,16 @@ sweep 的逐输出梯度来自同一次 total-objective backward 对预测张量
 反向次数。sweep 不运行任何输入、模块、表示、序列记忆、Oracle、rollout 或 optimizer
 模拟。
 
+宿主可在 composition root 对 `GenericCheckpointAdapter` 显式启用
+`reuse_compatible_checkpoint_session`。启用后，adapter 只在同一次
+`checkpoint_sweep` 内、相邻 checkpoint 的 `ModelSpec` 完全相等时复用已构造模型和
+宿主 data runtime；每个 checkpoint 仍重新执行 `CheckpointProvider.load()` 与严格
+`restore()`，重新绑定 checkpoint state/training provenance，清空 parameter gradients，
+并把非持久 registered buffers 恢复到首次构造基线。结构 identity 不同则关闭旧 session
+并回到完整构造；registered module hook catalog 漂移时同样重建，防止 analyzer hook 泄漏
+到下一个 checkpoint。restore 失败立即释放当前 session。`final_selected` 和默认未启用
+路径保持每个 loaded model 独立关闭；实际复用 session 统一由 adapter `close()` 收口。
+
 ## `final_selected`
 
 强制只选择一个 checkpoint。Base 先从通用 `nn.Module` 结构生成

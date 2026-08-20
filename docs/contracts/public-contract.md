@@ -30,6 +30,13 @@ def create_adapter(*, run_dir: str | Path) -> GenericCheckpointAdapter: ...
 adapter 持有宿主 runtime 时必须用 `owns_runtime=True` 组合；标准 CLI 会在
 成功或失败后统一 `close()`。
 
+若同一 run 的 sweep checkpoint 共享完全相同的 `ModelSpec`，且宿主的 model/data
+runtime 允许在严格 checkpoint restore 之间复用，可由 composition root 显式传入
+`reuse_compatible_checkpoint_session=True`。该选项默认关闭，只作用于
+`checkpoint_sweep`；不改变 checkpoint 选择、cohort、objective、artifact identity 或
+final-selected 生命周期。宿主必须把所有影响模型构造兼容性的字段写入 `ModelSpec`，不能
+依赖 checkpoint 文件名或未声明的 adapter 推断。
+
 `DiagnosticsRecipe` 只由 `checkpoint_sweep()` 或 `final_selected()` factory 在代码内
 构造。不存在可编辑 recipe、analyzer 列表、selector 或 per-analyzer option。
 
