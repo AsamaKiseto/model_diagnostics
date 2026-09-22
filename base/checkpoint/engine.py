@@ -1064,6 +1064,7 @@ def _execute_checkpoint_plans(
                     condition_id=branch_pair_id,
                     perform_backward=False,
                     objective_options={"response_only": True},
+                    evaluation_mode=True,
                 )
                 response_baseline_by_sample[sample_id] = response_baseline
             replacement = _resolve_replacement(
@@ -1107,6 +1108,7 @@ def _execute_checkpoint_plans(
                 condition_id=branch_pair_id,
                 perform_backward=False,
                 objective_options={"response_only": True},
+                evaluation_mode=True,
             )
             _write_module_comparison(
                 store,
@@ -1340,6 +1342,7 @@ def _run_branch(
     condition_id: str,
     perform_backward: bool = True,
     objective_options: Mapping[str, Any] | None = None,
+    evaluation_mode: bool = False,
 ) -> _BranchResult:
     adapter = execution.adapter
     model = loaded.model
@@ -1363,6 +1366,8 @@ def _run_branch(
             ),
             execution.device(loaded),
         ):
+            if evaluation_mode:
+                model.eval()
             model.zero_grad(set_to_none=True)
             stack = ExitStack()
             try:

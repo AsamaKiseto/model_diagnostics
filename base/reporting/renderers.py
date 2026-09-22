@@ -935,8 +935,31 @@ def _render_svg(figure: Mapping[str, Any]) -> str:
 
 BASE_RUNTIME_METRIC_GUIDES = (
     EvidenceMetric(
+        "objective_terms",
+        "Loss Components",
+        visualization="timeline",
+        category="training",
+        priority="P0",
+        description=(
+            "真实训练 heartbeat 中 objective_terms 的全部数值项；每个命名项"
+            "各形成一条曲线，原名称明确区分 loss、权重或其它 ledger 项。"
+        ),
+        reading=(
+            "沿 update 比较总目标、AR、chunk、shape 等命名 loss 的尺度、"
+            "突变和相对收敛速度；它们共享同一次训练执行，不增加 forward 或 backward。"
+        ),
+        reference=(
+            "只在 objective identity、term 名称、reduction、schedule 和样本支持"
+            "一致时比较；不同 term 的绝对量级可以不同。"
+        ),
+        invalid_when=(
+            "objective_terms 缺失、同名项语义变化、microbatch 被回滚，或不同 "
+            "objective identity 被混合。"
+        ),
+    ),
+    EvidenceMetric(
         "component_objective_value",
-        "逐输出训练目标",
+        "Per-Output Loss",
         visualization="timeline",
         category="training",
         priority="P0",
@@ -959,7 +982,7 @@ BASE_RUNTIME_METRIC_GUIDES = (
     ),
     EvidenceMetric(
         "raw_numerator_sum",
-        "归一化前逐输出目标",
+        "Pre-Normalization Output Loss",
         visualization="timeline",
         category="training",
         priority="P1",
@@ -982,7 +1005,7 @@ BASE_RUNTIME_METRIC_GUIDES = (
     ),
     EvidenceMetric(
         "raw_objective_sum",
-        "raw objective",
+        "Raw Training Loss",
         visualization="timeline",
         category="training",
         priority="P0",
@@ -993,7 +1016,7 @@ BASE_RUNTIME_METRIC_GUIDES = (
     ),
     EvidenceMetric(
         "backward_objective_sum",
-        "backward objective",
+        "Backward Training Loss",
         visualization="timeline",
         category="training",
         priority="P0",
@@ -1004,7 +1027,7 @@ BASE_RUNTIME_METRIC_GUIDES = (
     ),
     EvidenceMetric(
         "loss_cap_hit_fraction",
-        "loss-cap hit fraction",
+        "Loss-Cap Hit Fraction",
         role="context",
         visualization="timeline",
         category="training",
@@ -1016,18 +1039,21 @@ BASE_RUNTIME_METRIC_GUIDES = (
     ),
     EvidenceMetric(
         "gradient_norm",
-        "全局梯度范数",
+        "Global Gradient Norm",
         visualization="timeline",
         category="training",
         priority="P0",
-        description="训练执行器已计算的全局梯度范数，不额外扫描或反向传播。",
+        description=(
+            "训练执行器对实际 backward 总目标已经计算的全局参数梯度范数；"
+            "它不能拆解为各命名 loss 的参数梯度范数，也不额外扫描或反向传播。"
+        ),
         reading="沿训练步观察数量级突变、持续衰减和失败前后的变化。",
         reference="没有跨模型统一阈值；与本次训练自身历史和裁剪配置比较。",
         invalid_when="梯度尚未 unscale、梯度汇总不完整或该 update 未执行 backward。",
     ),
     EvidenceMetric(
         "rejected_microbatch_count",
-        "被拒绝的 microbatch 数",
+        "Rejected Microbatches",
         role="context",
         visualization="timeline",
         category="training",
@@ -1322,7 +1348,7 @@ BASE_EVIDENCE_RENDERER_DEFINITIONS = (
     EvidenceRendererDefinition(
         evidence_kind="checkpoint_conditioned_activation_intervention",
         title="最终模型模块影响",
-        analyzer_definition_version=2,
+        analyzer_definition_version=3,
         metrics=(
             EvidenceMetric(
                 "effect_value",

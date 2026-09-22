@@ -20,8 +20,8 @@ from model_diagnostics.base.artifacts import stable_json_hash
 from model_diagnostics.base.checkpoint import (
     CheckpointRef,
     CheckpointRuntimeDescriptor,
-    ComponentResponse,
     CohortSelection,
+    ComponentResponse,
     ConditionUnavailable,
     DiagnosticComponent,
     DiagnosticsRecipe,
@@ -88,6 +88,16 @@ class _LoadedRuntimeContext:
     objective_schedule_total: int | float | None
     objective_schedule_total_source: str
     weight_boundary: str | None
+    released: bool = False
+
+
+@dataclass(slots=True)
+class _ReusableSession:
+    """保存 sweep 内可复用 session 及构造后非持久 buffer 基线。"""
+
+    session: ExecutionSession
+    nonpersistent_buffers: dict[str, torch.Tensor]
+    module_hook_signature: tuple[tuple[str, str, tuple[str, ...]], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +125,7 @@ class GenericCheckpointAdapter:
             Sequence[str],
         ] | None = None,
         owns_runtime: bool = False,
+        reuse_compatible_checkpoint_session: bool = False,
     ) -> None:
         if not isinstance(runtime, HostTaskRuntime):
             raise TypeError("runtime must be a HostTaskRuntime")
@@ -140,6 +151,9 @@ class GenericCheckpointAdapter:
             }
         )
         self._owns_runtime = bool(owns_runtime)
+        self._reuse_compatible_checkpoint_session = bool(
+            reuse_compatible_checkpoint_session
+        )
         self.runtime_descriptor = _checkpoint_runtime_descriptor(runtime)
         self.rank, self.world_size = _distributed_identity(runtime)
         self.device = _runtime_device(runtime)
@@ -147,6 +161,8 @@ class GenericCheckpointAdapter:
         self._checkpoint_refs_by_path: dict[str, RuntimeCheckpointRef] = {}
         self._sample_refs_by_id: dict[str, RuntimeSampleRef] = {}
         self._open_sessions: dict[int, ExecutionSession] = {}
+        self._current_context_by_session: dict[int, _LoadedRuntimeContext] = {}
+        self._reusable_session: _ReusableSession | None = None
         self._component_catalog_by_session: dict[
             int,
             tuple[
@@ -247,7 +263,7 @@ class GenericCheckpointAdapter:
         return tuple(converted)
 
     def load_model(self, checkpoint_path: str, *, precision: str) -> LoadedModel:
-        """通过 HostTaskRuntime 打开一次 owned checkpoint session。"""
+        """打开 checkpoint session，或在显式启用时复用兼容的 sweep session。"""
 
         self._ensure_open()
         requested_precision = str(precision).strip().lower()
@@ -262,14 +278,17 @@ class GenericCheckpointAdapter:
             raise ValueError(
                 "checkpoint path was not returned by resolve_checkpoints"
             )
-        session = self.runtime.open_session(runtime_ref, device=self.device)
-        self._open_sessions[id(session)] = session
-        metadata = dict(session.handle.metadata)
+        session = self._open_or_restore_session(runtime_ref)
         checkpoint_metadata = dict(
             session.checkpoint_state.metadata
             if session.checkpoint_state is not None
             else {}
         )
+        metadata = {
+            **dict(session.handle.metadata),
+            **checkpoint_metadata,
+            "checkpoint_state_metadata": checkpoint_metadata,
+        }
         provenance = (
             session.checkpoint_state.training_provenance
             if session.checkpoint_state is not None
@@ -303,6 +322,16 @@ class GenericCheckpointAdapter:
             if provenance is not None
             else None
         )
+        context = _LoadedRuntimeContext(
+            session=session,
+            checkpoint=runtime_ref,
+            objective_schedule_coordinate=schedule_coordinate,
+            objective_schedule_source=schedule_source,
+            objective_schedule_total=schedule_total,
+            objective_schedule_total_source=schedule_total_source,
+            weight_boundary=weight_boundary,
+        )
+        self._current_context_by_session[id(session)] = context
         return LoadedModel(
             model=session.model,
             checkpoint_update=checkpoint_update,
@@ -315,11 +344,9 @@ class GenericCheckpointAdapter:
                     runtime_ref.metadata.get("update")
                 ),
                 "embedded_local_completed_update": _optional_int(
-                    (
-                        provenance.local_completed_update
-                        if provenance is not None
-                        else None
-                    )
+                    provenance.local_completed_update
+                    if provenance is not None
+                    else None
                 ),
                 "checkpoint_update_source": (
                     "checkpoint_training_provenance.local_completed_update"
@@ -341,16 +368,133 @@ class GenericCheckpointAdapter:
                 str(key)
                 for key in checkpoint_metadata.get("ignored_payload_keys", ())
             ),
-            adapter_context=_LoadedRuntimeContext(
-                session=session,
-                checkpoint=runtime_ref,
-                objective_schedule_coordinate=schedule_coordinate,
-                objective_schedule_source=schedule_source,
-                objective_schedule_total=schedule_total,
-                objective_schedule_total_source=schedule_total_source,
-                weight_boundary=weight_boundary,
-            ),
+            adapter_context=context,
         )
+
+    def _open_or_restore_session(
+        self,
+        checkpoint: RuntimeCheckpointRef,
+    ) -> ExecutionSession:
+        """在 sweep 内复用结构兼容的模型，仍逐 checkpoint 执行严格 restore。
+
+        `ModelSpec` 是 Host Runtime 的构造身份；只有它完全相等时才允许复用。checkpoint
+        state、training provenance 和 persistent buffers 仍由 provider 每次重新加载并
+        恢复。非持久 registered buffers 则回到首次构造后的基线，避免前一 checkpoint
+        的 forward 状态泄漏到下一次分析。
+        """
+
+        reusable = (
+            self._reusable_session
+            if self._reuse_checkpoint_session_for_current_recipe()
+            else None
+        )
+        if reusable is None:
+            session = self.runtime.open_session(checkpoint, device=self.device)
+            self._register_open_session(session)
+            if self._reuse_checkpoint_session_for_current_recipe():
+                self._reusable_session = _ReusableSession(
+                    session=session,
+                    nonpersistent_buffers=_capture_nonpersistent_buffers(
+                        session.model
+                    ),
+                    module_hook_signature=_module_hook_signature(session.model),
+                )
+            return session
+
+        state = self.runtime.checkpoints.load(
+            checkpoint,
+            map_location=self.device,
+        )
+        if state.checkpoint != checkpoint:
+            raise ValueError(
+                "checkpoint provider returned state for a different CheckpointRef"
+            )
+        current_state = reusable.session.checkpoint_state
+        if current_state is None:
+            self._retire_session(reusable.session)
+            raise RuntimeError(
+                "reusable checkpoint session is missing checkpoint state"
+            )
+        if (
+            not _model_specs_equal(current_state.model_spec, state.model_spec)
+            or _module_hook_signature(reusable.session.model)
+            != reusable.module_hook_signature
+        ):
+            return self._replace_reusable_session(
+                reusable.session,
+                checkpoint,
+            )
+
+        previous_context = self._current_context_by_session.pop(
+            id(reusable.session),
+            None,
+        )
+        if previous_context is not None:
+            previous_context.released = True
+        try:
+            _restore_nonpersistent_buffers(
+                reusable.session.model,
+                reusable.nonpersistent_buffers,
+            )
+            reusable.session.model.zero_grad(set_to_none=True)
+            self.runtime.checkpoints.restore(reusable.session.handle, state)
+            reusable.session.model.zero_grad(set_to_none=True)
+        except BaseException:
+            self._retire_session(reusable.session)
+            raise
+        reusable.session.checkpoint_state = state
+        return reusable.session
+
+    def _replace_reusable_session(
+        self,
+        previous: ExecutionSession,
+        checkpoint: RuntimeCheckpointRef,
+    ) -> ExecutionSession:
+        """在结构或 hook catalog 漂移时回到完整 session 构造。"""
+
+        self._retire_session(previous)
+        session = self.runtime.open_session(checkpoint, device=self.device)
+        self._register_open_session(session)
+        self._reusable_session = _ReusableSession(
+            session=session,
+            nonpersistent_buffers=_capture_nonpersistent_buffers(session.model),
+            module_hook_signature=_module_hook_signature(session.model),
+        )
+        return session
+
+    def _reuse_checkpoint_session_for_current_recipe(self) -> bool:
+        """把复用严格限制在 checkpoint sweep；final-selected 保持原生命周期。"""
+
+        return bool(
+            self._reuse_compatible_checkpoint_session
+            and self._recipe is not None
+            and self._recipe.stage == "checkpoint_sweep"
+        )
+
+    def _register_open_session(self, session: ExecutionSession) -> None:
+        """登记 adapter-owned session，并拒绝复用已关闭对象。"""
+
+        if session.closed:
+            raise RuntimeError("Host Runtime returned a closed checkpoint session")
+        self._open_sessions[id(session)] = session
+
+    def _retire_session(self, session: ExecutionSession) -> None:
+        """关闭一个实际 session，并清除所有与其绑定的 adapter cache。"""
+
+        current_context = self._current_context_by_session.pop(
+            id(session),
+            None,
+        )
+        if current_context is not None:
+            current_context.released = True
+        session.close()
+        self._open_sessions.pop(id(session), None)
+        self._component_catalog_by_session.pop(id(session), None)
+        if (
+            self._reusable_session is not None
+            and self._reusable_session.session is session
+        ):
+            self._reusable_session = None
 
     def build_cohort(
         self,
@@ -1063,14 +1207,24 @@ class GenericCheckpointAdapter:
             barrier()
 
     def close_loaded_model(self, loaded: LoadedModel) -> None:
-        """幂等关闭该 LoadedModel 对应的 owned Host Runtime session。"""
+        """释放 LoadedModel；sweep 复用开启时把实际关闭延迟到 adapter.close。"""
 
         context = loaded.adapter_context
         if not isinstance(context, _LoadedRuntimeContext):
             raise TypeError("LoadedModel was not created by this adapter")
-        context.session.close()
-        self._open_sessions.pop(id(context.session), None)
-        self._component_catalog_by_session.pop(id(context.session), None)
+        if context.released:
+            return
+        context.released = True
+        current = self._current_context_by_session.get(id(context.session))
+        if current is context:
+            self._current_context_by_session.pop(id(context.session), None)
+        if (
+            self._reuse_checkpoint_session_for_current_recipe()
+            and self._reusable_session is not None
+            and self._reusable_session.session is context.session
+        ):
+            return
+        self._retire_session(context.session)
 
     def close(self) -> None:
         """关闭 checkpoint sessions，并按显式 ownership 收口 runtime 资源。"""
@@ -1079,8 +1233,10 @@ class GenericCheckpointAdapter:
             return
         self._closed = True
         for session in tuple(self._open_sessions.values()):
-            session.close()
+            self._retire_session(session)
         self._open_sessions.clear()
+        self._current_context_by_session.clear()
+        self._reusable_session = None
         self._component_catalog_by_session.clear()
         self._frozen_component_catalog = None
         if self._owns_runtime:
@@ -1095,6 +1251,8 @@ class GenericCheckpointAdapter:
         context = loaded.adapter_context
         if not isinstance(context, _LoadedRuntimeContext):
             raise TypeError("LoadedModel does not carry a Host Runtime session")
+        if context.released:
+            raise RuntimeError("LoadedModel is already released")
         if context.session.closed:
             raise RuntimeError("checkpoint session is already closed")
         return context
@@ -1333,16 +1491,91 @@ def _schedule_total_value(value: Any) -> int | float:
     return value
 
 
+def _model_specs_equal(left: Any, right: Any) -> bool:
+    """安全比较 task-neutral ModelSpec；不可判定时按不兼容处理。"""
+
+    try:
+        result = left == right
+        return result if isinstance(result, bool) else False
+    except (RuntimeError, TypeError, ValueError):
+        return False
+
+
+def _capture_nonpersistent_buffers(
+    model: torch.nn.Module,
+) -> dict[str, torch.Tensor]:
+    """捕获不进入 state_dict 的 registered buffers 构造基线。"""
+
+    captured: dict[str, torch.Tensor] = {}
+    for module_path, module in model.named_modules():
+        for buffer_name in module._non_persistent_buffers_set:
+            buffer = module._buffers.get(buffer_name)
+            if buffer is None:
+                continue
+            path = f"{module_path}.{buffer_name}" if module_path else buffer_name
+            captured[path] = buffer.detach().clone()
+    return captured
+
+
+def _restore_nonpersistent_buffers(
+    model: torch.nn.Module,
+    state: Mapping[str, torch.Tensor],
+) -> None:
+    """恢复构造期非持久 buffers；catalog/shape 漂移时拒绝继续复用。"""
+
+    current = dict(model.named_buffers())
+    if not set(state).issubset(current):
+        raise RuntimeError(
+            "nonpersistent buffer catalog changed in reusable checkpoint session"
+        )
+    with torch.no_grad():
+        for name, value in state.items():
+            target = current[name]
+            if target.shape != value.shape or target.dtype != value.dtype:
+                raise RuntimeError(
+                    "nonpersistent buffer structure changed in reusable "
+                    f"checkpoint session: {name}"
+                )
+            target.copy_(value)
+
+
+def _module_hook_signature(
+    model: torch.nn.Module,
+) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    """记录构造期 module hook catalog，防止 analyzer hook 泄漏到下一 checkpoint。"""
+
+    records: list[tuple[str, str, tuple[str, ...]]] = []
+    hook_attributes = (
+        "_forward_pre_hooks",
+        "_forward_hooks",
+        "_backward_pre_hooks",
+        "_backward_hooks",
+    )
+    for module_path, module in model.named_modules():
+        for attribute in hook_attributes:
+            hooks = getattr(module, attribute, {})
+            records.append(
+                (
+                    module_path,
+                    attribute,
+                    tuple(sorted(str(key) for key in hooks)),
+                )
+            )
+    return tuple(records)
+
+
 def create_checkpoint_adapter(
     *,
     runtime: HostTaskRuntime,
     run_dir: str | Path,
     owns_runtime: bool = False,
+    reuse_compatible_checkpoint_session: bool = False,
 ) -> GenericCheckpointAdapter:
     """为任意 HostTaskRuntime 组合 portable checkpoint adapter。
 
     宿主只负责构造 runtime；analyzer catalog、binding 与 checkpoint engine 翻译均由
-    独立包统一拥有，避免每个仓库复制诊断执行流程。
+    独立包统一拥有，避免每个仓库复制诊断执行流程。兼容 session 复用必须由宿主
+    composition root 显式选择，默认保持逐 LoadedModel 独立资源生命周期。
     """
 
     from .bindings import compose_checkpoint_binding_plan
@@ -1358,6 +1591,9 @@ def create_checkpoint_adapter(
             plan.capability_requirements_by_analyzer
         ),
         owns_runtime=bool(owns_runtime),
+        reuse_compatible_checkpoint_session=bool(
+            reuse_compatible_checkpoint_session
+        ),
     )
 
 

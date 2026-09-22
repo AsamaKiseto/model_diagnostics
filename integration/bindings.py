@@ -7,8 +7,8 @@ final-selected 阶段运行。这里不复制宿主 objective、rollout 或数�
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from contextlib import ExitStack
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 import math
 import time
@@ -612,13 +612,192 @@ def _distribution_output_hook(
     return hook
 
 
+@contextmanager
+def _isolated_final_response_model(
+    context: AnalyzerRunContext,
+) -> Iterator[tuple[Mapping[str, torch.Tensor], torch.device]]:
+    """隔离最终预测响应分支，并在退出时恢复权重、buffer 与 module mode。
+
+    最终输入和模块影响回答的是 checkpoint 的评估响应，不应继承宿主为了训练
+    objective 而保留的 ``train()`` 状态。每个 condition 仍会在执行前恢复这里
+    捕获的 registered buffers，避免有状态 forward 把前一个 condition 污染到
+    后一个；完整 parameter/buffer state 在 analyzer 退出时恢复一次。
+    """
+
+    model = context.loaded.model
+    model_state = capture_canonical_model_state(model)
+    buffer_state = {
+        name: buffer.detach().clone()
+        for name, buffer in model.named_buffers()
+    }
+    parameter = next(model.parameters(), None)
+    if parameter is not None:
+        device = parameter.device
+    else:
+        buffer = next(model.buffers(), None)
+        device = buffer.device if buffer is not None else torch.device("cpu")
+    with preserve_module_modes(model):
+        try:
+            model.eval()
+            model.zero_grad(set_to_none=True)
+            yield buffer_state, device
+        finally:
+            restore_canonical_model_state(model, model_state)
+            model.zero_grad(set_to_none=True)
+
+
+def _restore_final_response_buffers(
+    model: torch.nn.Module,
+    state: Mapping[str, torch.Tensor],
+) -> None:
+    """恢复 response-only forward 可能修改的 registered buffers。
+
+    这些分支不执行 backward 或 optimizer step，parameter 因而保持只读。逐分支
+    仅复制 buffers，避免数千次 ``load_state_dict``；analyzer 退出时仍完整恢复
+    parameter/buffer state，保证宿主看到的模型没有变化。
+    """
+
+    current = dict(model.named_buffers())
+    if current.keys() != state.keys():
+        raise RuntimeError("registered buffer catalog changed during final response analysis")
+    with torch.no_grad():
+        for name, value in state.items():
+            target = current[name]
+            target.copy_(value)
+
+
+def _execute_final_response_unit(
+    context: AnalyzerRunContext,
+    batch: Any,
+    *,
+    buffer_state: Mapping[str, torch.Tensor],
+    device: torch.device,
+    seed: int,
+) -> Any:
+    """从同一 canonical state 与随机流执行一个 response-only condition。"""
+
+    model = context.loaded.model
+    _restore_final_response_buffers(model, buffer_state)
+    model.eval()
+    with paired_branch_rng(seed, device):
+        return context.adapter.execute_objective_unit(
+            context.loaded,
+            batch,
+            objective={"response_only": True},
+            return_aux=False,
+        )
+
+
+def _accumulate_paired_response(
+    summary: dict[str, Any],
+    paired_row: Mapping[str, Any],
+    *,
+    group_id: str | None,
+) -> None:
+    """累计 cohort mean/min/max 与 support 的充分统计。"""
+
+    summary["sample_count"] += 1
+    if group_id is not None:
+        summary["group_ids"].add(group_id)
+    for field in (
+        "baseline_value",
+        "condition_value",
+        "raw_delta",
+        "effect_value",
+        "normalized_effect",
+    ):
+        value = paired_row.get(field)
+        if value is None:
+            continue
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            continue
+        summary[f"{field}_sum"] = (
+            float(summary.get(f"{field}_sum", 0.0)) + numeric
+        )
+        summary[f"{field}_count"] = int(
+            summary.get(f"{field}_count", 0)
+        ) + 1
+        summary[f"{field}_min"] = min(
+            numeric,
+            float(summary.get(f"{field}_min", numeric)),
+        )
+        summary[f"{field}_max"] = max(
+            numeric,
+            float(summary.get(f"{field}_max", numeric)),
+        )
+    summary["effect_count"] += 1
+    for field in (
+        "baseline_support_count",
+        "condition_support_count",
+        "support_count",
+    ):
+        value = paired_row.get(field)
+        if value is not None:
+            summary[field] = int(summary.get(field, 0)) + int(value)
+
+
+def _new_paired_response_summary() -> dict[str, Any]:
+    """创建一组尚未观察到有效配对的 cohort 充分统计。"""
+
+    return {
+        "sample_count": 0,
+        "group_ids": set(),
+        "unavailable_sample_count": 0,
+        "skip_reasons": set(),
+        "effect_count": 0,
+    }
+
+
+def _finalize_paired_response(
+    template: Mapping[str, Any],
+    summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    """把充分统计收口为一条 cohort 级 response evidence。"""
+
+    row = dict(template)
+    for field in (
+        "baseline_value",
+        "condition_value",
+        "raw_delta",
+        "effect_value",
+        "normalized_effect",
+    ):
+        count = int(summary.get(f"{field}_count", 0))
+        row[field] = (
+            float(summary[f"{field}_sum"]) / count if count else None
+        )
+        row[f"{field}_min"] = summary.get(f"{field}_min")
+        row[f"{field}_max"] = summary.get(f"{field}_max")
+    row.update(
+        {
+            "baseline_support_count": summary.get(
+                "baseline_support_count", 0
+            ),
+            "condition_support_count": summary.get(
+                "condition_support_count", 0
+            ),
+            "support_count": summary.get("support_count", 0),
+            "sample_count": summary["sample_count"],
+            "group_count": len(summary["group_ids"]),
+            "unavailable_sample_count": summary[
+                "unavailable_sample_count"
+            ],
+            "skip_reasons": sorted(summary["skip_reasons"]),
+            "aggregation": "cohort_mean_with_min_max",
+        }
+    )
+    return row
+
+
 def _run_final_channel_influence(
     context: AnalyzerRunContext,
 ) -> AnalyzerExecutionResult:
-    """以 identity/mean replacement 计算完整 input × output 响应矩阵。
+    """以输出级重复前向对照和 mean replacement 计算输入影响矩阵。
 
-    最终报告只需要 cohort 层面的方向证据。这里在内存中累计充分统计，每个
-    input × output × method 只持久化一行，避免把逐样本笛卡尔积写成数百万行。
+    identity 与输入通道无关，因此每个样本只执行一次并按输出聚合。实际干预
+    仍按 input × output 持久化；报告可把同一输出的对照均值和范围关联到每个
+    实际干预行，而不把随机差异当作可线性扣除的偏置。
     """
 
     capability = _runtime_capability(context, "input_dependence")
@@ -626,50 +805,115 @@ def _run_final_channel_influence(
     adapter = context.adapter
     session = adapter.runtime_session(context.loaded)
     summaries: dict[tuple[str, str, str], dict[str, Any]] = {}
+    controls: dict[str, dict[str, Any]] = {}
     availability: dict[tuple[str, str], dict[str, Any]] = {}
     condition_failures: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for sample in context.samples:
-        batch = adapter.materialize_sample(context.loaded, sample)
-        inputs, outputs, _digest = adapter.component_catalog(
-            context.loaded,
-            batch,
-        )
-        input_ids = {
-            item.component.component_id for item in inputs
-        }
-        baseline_unit = adapter.execute_objective_unit(
-            context.loaded,
-            batch,
-            objective={"response_only": True},
-            return_aux=False,
-        )
-        baseline, baseline_unavailable = output_response_map(
-            evaluator,
-            batch=batch,
-            unit=baseline_unit,
-            outputs=outputs,
-        )
-        for output_id, reason in baseline_unavailable.items():
-            state = availability.setdefault(
-                (output_id, reason),
-                {
-                    "sample_count": 0,
-                    "group_ids": set(),
-                },
+    with _isolated_final_response_model(context) as (buffer_state, device):
+        for sample in context.samples:
+            batch = adapter.materialize_sample(context.loaded, sample)
+            inputs, outputs, _digest = adapter.component_catalog(
+                context.loaded,
+                batch,
             )
-            state["sample_count"] += 1
-            if sample.group_id is not None:
-                state["group_ids"].add(sample.group_id)
-        for target in capability.list_targets(
-            session=session,
-            batch=batch,
-        ):
-            input_id = target.input.component.component_id
-            if input_id not in input_ids:
-                raise ValueError(
-                    "input target is absent from component catalog"
+            input_ids = {
+                item.component.component_id for item in inputs
+            }
+            seed = int(
+                stable_json_hash(
+                    {
+                        "checkpoint_identity": context.checkpoint.identity,
+                        "analyzer": "final_channel_influence",
+                        "sample_id": sample.sample_id,
+                    }
+                )[:16],
+                16,
+            )
+            baseline_unit = _execute_final_response_unit(
+                context,
+                batch,
+                buffer_state=buffer_state,
+                device=device,
+                seed=seed,
+            )
+            baseline, baseline_unavailable = output_response_map(
+                evaluator,
+                batch=batch,
+                unit=baseline_unit,
+                outputs=outputs,
+            )
+            for output_id, reason in baseline_unavailable.items():
+                state = availability.setdefault(
+                    (output_id, reason),
+                    {
+                        "sample_count": 0,
+                        "group_ids": set(),
+                    },
                 )
-            for method in ("identity", "mean"):
+                state["sample_count"] += 1
+                if sample.group_id is not None:
+                    state["group_ids"].add(sample.group_id)
+
+            repeat_unit = _execute_final_response_unit(
+                context,
+                batch,
+                buffer_state=buffer_state,
+                device=device,
+                seed=seed,
+            )
+            repeated, repeat_unavailable = output_response_map(
+                evaluator,
+                batch=batch,
+                unit=repeat_unit,
+                outputs=outputs,
+            )
+            for output_id, reason in repeat_unavailable.items():
+                if output_id not in baseline:
+                    continue
+                state = controls.setdefault(
+                    output_id,
+                    _new_paired_response_summary(),
+                )
+                state["unavailable_sample_count"] += 1
+                state["skip_reasons"].add(reason)
+            for output_id, baseline_response in baseline.items():
+                if output_id not in repeated:
+                    continue
+                paired_row = pair_output_responses(
+                    baseline_response,
+                    repeated[output_id],
+                ).to_dict()
+                state = controls.setdefault(
+                    output_id,
+                    _new_paired_response_summary(),
+                )
+                state.setdefault(
+                    "template",
+                    {
+                        **paired_row,
+                        "record_kind": "output_repeatability_control",
+                        "method": "identity",
+                        "control_scope": "output",
+                        "control_status": "identity_control",
+                        "predictive_dependence_only": True,
+                        "physical_causality_claimed": False,
+                    },
+                )
+                _accumulate_paired_response(
+                    state,
+                    paired_row,
+                    group_id=sample.group_id,
+                )
+
+            for target in capability.list_targets(
+                session=session,
+                batch=batch,
+            ):
+                input_id = target.input.component.component_id
+                if input_id not in input_ids:
+                    raise ValueError(
+                        "input target is absent from component catalog"
+                    )
+                method = "mean"
                 condition_id = f"input:{input_id}:{method}"
                 try:
                     replacement = capability.replace(
@@ -677,11 +921,12 @@ def _run_final_channel_influence(
                         target=target,
                         method=method,
                     )
-                    unit = adapter.execute_objective_unit(
-                        context.loaded,
+                    unit = _execute_final_response_unit(
+                        context,
                         replacement.batch,
-                        objective={"response_only": True},
-                        return_aux=False,
+                        buffer_state=buffer_state,
+                        device=device,
+                        seed=seed,
                     )
                     changed, changed_unavailable = output_response_map(
                         evaluator,
@@ -708,13 +953,7 @@ def _run_final_channel_influence(
                         continue
                     summary = summaries.setdefault(
                         (input_id, method, output_id),
-                        {
-                            "sample_count": 0,
-                            "group_ids": set(),
-                            "unavailable_sample_count": 0,
-                            "skip_reasons": set(),
-                            "effect_count": 0,
-                        },
+                        _new_paired_response_summary(),
                     )
                     summary["unavailable_sample_count"] += 1
                     summary["skip_reasons"].add(reason)
@@ -728,17 +967,8 @@ def _run_final_channel_influence(
                     paired_row = paired.to_dict()
                     summary = summaries.setdefault(
                         (input_id, method, output_id),
-                        {
-                            "sample_count": 0,
-                            "group_ids": set(),
-                            "unavailable_sample_count": 0,
-                            "skip_reasons": set(),
-                            "effect_count": 0,
-                        },
+                        _new_paired_response_summary(),
                     )
-                    summary["sample_count"] += 1
-                    if sample.group_id is not None:
-                        summary["group_ids"].add(sample.group_id)
                     summary.setdefault(
                         "template",
                         {
@@ -765,54 +995,16 @@ def _run_final_channel_influence(
                             "replacement_provenance": dict(
                                 replacement.provenance
                             ),
-                            "control_status": (
-                                "identity_control"
-                                if method == "identity"
-                                else "intervention"
-                            ),
+                            "control_status": "intervention",
                             "predictive_dependence_only": True,
                             "physical_causality_claimed": False,
                         },
                     )
-                    for field in (
-                        "baseline_value",
-                        "condition_value",
-                        "raw_delta",
-                        "effect_value",
-                        "normalized_effect",
-                    ):
-                        value = paired_row.get(field)
-                        if value is None:
-                            continue
-                        numeric = float(value)
-                        if not math.isfinite(numeric):
-                            continue
-                        summary[f"{field}_sum"] = (
-                            float(summary.get(f"{field}_sum", 0.0))
-                            + numeric
-                        )
-                        summary[f"{field}_count"] = (
-                            int(summary.get(f"{field}_count", 0)) + 1
-                        )
-                        summary[f"{field}_min"] = min(
-                            numeric,
-                            float(summary.get(f"{field}_min", numeric)),
-                        )
-                        summary[f"{field}_max"] = max(
-                            numeric,
-                            float(summary.get(f"{field}_max", numeric)),
-                        )
-                    summary["effect_count"] += 1
-                    for field in (
-                        "baseline_support_count",
-                        "condition_support_count",
-                        "support_count",
-                    ):
-                        value = paired_row.get(field)
-                        if value is not None:
-                            summary[field] = int(
-                                summary.get(field, 0)
-                            ) + int(value)
+                    _accumulate_paired_response(
+                        summary,
+                        paired_row,
+                        group_id=sample.group_id,
+                    )
 
     rows: list[dict[str, Any]] = []
     for (output_id, reason), state in sorted(availability.items()):
@@ -840,6 +1032,28 @@ def _run_final_channel_influence(
                 "group_count": len(state["group_ids"]),
             }
         )
+    for output_id, state in sorted(controls.items()):
+        template = state.get("template")
+        if template is None:
+            rows.append(
+                {
+                    **_insufficient(
+                        "、".join(sorted(state["skip_reasons"]))
+                        or "repeat_forward_response_unavailable"
+                    ),
+                    "record_kind": "output_repeatability_control",
+                    "response_component_id": output_id,
+                    "method": "identity",
+                    "control_scope": "output",
+                    "control_status": "identity_control_unavailable",
+                    "sample_count": 0,
+                    "unavailable_sample_count": state[
+                        "unavailable_sample_count"
+                    ],
+                }
+            )
+            continue
+        rows.append(_finalize_paired_response(template, state))
     for (input_id, method, output_id), state in sorted(summaries.items()):
         template = state.get("template")
         if template is None:
@@ -861,41 +1075,7 @@ def _run_final_channel_influence(
                 }
             )
             continue
-        row = dict(template)
-        for field in (
-            "baseline_value",
-            "condition_value",
-            "raw_delta",
-            "effect_value",
-            "normalized_effect",
-        ):
-            count = int(state.get(f"{field}_count", 0))
-            row[field] = (
-                float(state[f"{field}_sum"]) / count
-                if count
-                else None
-            )
-            row[f"{field}_min"] = state.get(f"{field}_min")
-            row[f"{field}_max"] = state.get(f"{field}_max")
-        row.update(
-            {
-                "baseline_support_count": state.get(
-                    "baseline_support_count", 0
-                ),
-                "condition_support_count": state.get(
-                    "condition_support_count", 0
-                ),
-                "support_count": state.get("support_count", 0),
-                "sample_count": state["sample_count"],
-                "group_count": len(state["group_ids"]),
-                "unavailable_sample_count": (
-                    state["unavailable_sample_count"]
-                ),
-                "skip_reasons": sorted(state["skip_reasons"]),
-                "aggregation": "cohort_mean_with_min_max",
-            }
-        )
-        rows.append(row)
+        rows.append(_finalize_paired_response(template, state))
     return _execution_result(
         "final_channel_influence",
         rows or (_insufficient("empty_cohort"),),
@@ -912,6 +1092,22 @@ def _run_final_input_sensitivity(
     非对称响应误写成尺度敏感度。每个方向先相对于该样本输出自身 RMS 归一化，
     再对方向和样本做等权 RMS；输入差分能量只验证干预执行，不进入指标分母。
     """
+
+    with _isolated_final_response_model(context) as (buffer_state, device):
+        return _collect_final_input_sensitivity(
+            context,
+            buffer_state=buffer_state,
+            device=device,
+        )
+
+
+def _collect_final_input_sensitivity(
+    context: AnalyzerRunContext,
+    *,
+    buffer_state: Mapping[str, torch.Tensor],
+    device: torch.device,
+) -> AnalyzerExecutionResult:
+    """在已经隔离的 eval model 上收集输入扰动敏感度。"""
 
     from model_diagnostics.extensions.input_dependence import (
         symmetric_relative_output_response,
@@ -934,15 +1130,26 @@ def _run_final_input_sensitivity(
             context.loaded,
             batch,
         )
-        baseline_unit = adapter.execute_objective_unit(
-            context.loaded,
+        model_seed = int(
+            stable_json_hash(
+                {
+                    "checkpoint_identity": context.checkpoint.identity,
+                    "analyzer": "final_input_sensitivity",
+                    "sample_id": sample.sample_id,
+                }
+            )[:16],
+            16,
+        ) % (2**63 - 1)
+        baseline_unit = _execute_final_response_unit(
+            context,
             batch,
-            objective={"response_only": True},
-            return_aux=False,
+            buffer_state=buffer_state,
+            device=device,
+            seed=model_seed,
         )
         for input_ref in inputs:
             input_id = input_ref.component.component_id
-            seed = int(
+            direction_seed = int(
                 stable_json_hash(
                     {
                         "analyzer": "final_input_sensitivity",
@@ -962,13 +1169,14 @@ def _run_final_input_sensitivity(
                             input=input_ref,
                             scale=scale,
                             direction=direction,
-                            direction_seed=seed,
+                            direction_seed=direction_seed,
                         )
-                        condition_unit = adapter.execute_objective_unit(
-                            context.loaded,
+                        condition_unit = _execute_final_response_unit(
+                            context,
                             perturbation.batch,
-                            objective={"response_only": True},
-                            return_aux=False,
+                            buffer_state=buffer_state,
+                            device=device,
+                            seed=model_seed,
                         )
                         output_responses = capability.compare_outputs(
                             batch=perturbation.batch,

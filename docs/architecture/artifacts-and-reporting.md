@@ -26,6 +26,18 @@ checkpoint finalize 对 detail stream 使用显式 `evidence_key` 去重；没�
 同一训练步的均值，不再叠加会挤压纵轴的逐样本散点；数值完全重合的指标使用不同线型叠加并显式说明，
 不能让后画曲线遮住先画曲线。
 
+训练页把目标信息固定拆成三组：`objective_terms` 中的全部命名训练目标项、
+`component_objective_value` 的逐输出通道 loss，以及 `raw_objective_sum /
+backward_objective_sum` 的整体目标。三组都只复用 flight recorder 已保存的真实训练 ledger，
+不增加 forward 或 backward。报告保留每个 term 的原始名称，使 loss、调度权重和其它 ledger
+项能够被区分，而不在通用报告中按名称猜测任务语义。
+
+训练页的 `gradient_norm` 是实际 backward 总目标对全部参数的全局梯度范数。标量
+`objective_terms` 不能反推出每一项的参数梯度；逐 loss 参数梯度需要为每个目标项单独执行
+`autograd.grad`/VJP，会显著增加训练时间与图保留成本，因此 flight recorder 不计算也不绘制
+这类曲线。逐输出张量的直接梯度由 checkpoint sweep 的 `output_gradient_rms` 提供，不能与
+逐 loss 参数梯度混称。
+
 所有趋势图在主页面固定使用线性纵轴；点击图表进入放大窗口后，才提供“线性”和
 “对称对数”两种纵轴尺度。对称对数使用
 `sign(y) * log10(1 + abs(y) / threshold)`，其中 `threshold` 是当前纵轴最大绝对值的
@@ -34,6 +46,13 @@ checkpoint finalize 对 detail stream 使用显式 `evidence_key` 去重；没�
 `1/2/2.5/5 × 10ⁿ` 的整洁间隔；对称对数轴主刻度固定为带符号的 `10ⁿ` 和零，不显示
 由变换后等距反算得到的零碎小数。
 
+主图和放大图使用同一份交互契约：鼠标靠近观测点时优先显示点信息，位于曲线而不靠近点时
+显示整条曲线信息。放大窗口使用其 dialog 内部的 tooltip，避免浏览器 top-layer 隔离使提示
+被遮挡。训练过程监测的功能图固定为全宽、等高卡片，不因指标数量或本次数据形态改成半宽图。
+技术标题保留完整的领域术语，例如 `Loss Components`、`Per-Output Loss`、
+`Global Gradient Norm`、`Raw Training Loss` 和 `Backward Training Loss`。受控标题不再经过
+逐词翻译，只压缩多余空白；中文用于描述指标关系、有效性和阅读方式。
+
 激活与归一化层分布趋势按 `module_path + tap_id` 建立曲线身份。discovery 找到的每个
 Activation、BatchNorm、LayerNorm、GroupNorm 或 InstanceNorm `nn.Module` 都单独成线；
 不存在对应模块类型时不生成虚假曲线。`output_rms`、`output_std`、`output_abs_max`、
@@ -41,24 +60,28 @@ Activation、BatchNorm、LayerNorm、GroupNorm 或 InstanceNorm `nn.Module` 都�
 只有同时缺少输出通道身份、`module_path`、`tap_id` 和 `node_id` 的普通 runtime 记录才
 允许汇总成总体均值；带层身份的观测不得跨层合并。
 
-输入×输出和模块×输出固定使用可筛选分页列表，列出干预方法、输入或模块、输出通道、
-cohort 均值、范围、support、干预元素范围、可用样本、未干预路径核对和缺失原因。输入
-replacement 的 `changed_element_count / affected_value_element_count`、
-`unavailable_sample_count / sample_count`、`preserved_paths_verified` 只作为同一影响结果的
-有效性列，不另画缺少比较意义的图。模块干预没有对应输入 replacement 口径时显示 `—`，
-不能把缺失值视为通过。列表保留全部组合，但每页只创建 100 行 DOM；
-identity/null control 与实际干预可以分别筛选。每个影响页保留一个默认折叠、展开时才创建
+输入×输出和模块×输出固定使用可筛选分页列表。主表只列实际干预方法、输入或模块、
+输出通道、cohort 均值、实际响应范围、恒等对照平均响应和恒等对照响应范围；恒等对照
+不再作为可筛选的干预类型。输入对照按输出通道共享，模块对照按模块站点与输出通道
+配对。`support_count`、`changed_element_count / affected_value_element_count`、
+`unavailable_sample_count / sample_count` 和 `preserved_paths_verified` 继续完整保存在 artifact，
+但只有缺失、未配对或核对失败时才进入折叠的有效性表。列表保留全部实际干预组合，
+但每页只创建 100 行 DOM。每个影响页保留一个默认折叠、展开时才创建
 的色块矩阵，作为表格的补充证据；关闭页面时不会预先创建大型笛卡尔积 SVG。
+模块影响页额外持久显示已覆盖的 `Stage` / `Block` 数量，并按 `hierarchy_level` 与
+`module_path` 提供两个独立筛选器。列表和矩阵默认包含所有已确认模块，而不是只选择首个
+模块；矩阵使用当前筛选，避免把全部 Block 强行挤进同一视图。
 rollout 使用完整时间序列及少量汇总；不会为每个充分统计单独生成图。主视图之外还提供
 全部输出通道 × horizon × RMSE/sRMSE/最大局部斜率/episode 数的概览色块，以及
 success/structured skip、候选样本、有效样本、有效元素和排除原因表。`cohort_item_ids`
 只用于原始证据审计，不生成没有比较意义的逐 ID 图。
 
-影响列表中的“平均响应”是同一干预类型、方法、输入或模块、输出通道下所有有限
+影响列表中的“平均响应”是同一干预方法、输入或模块、输出通道下所有有限
 `effect_value` 的算术平均；生产者已经按 cohort 汇总时，一条记录就是 cohort 均值。
 “响应最小值/最大值”是同一组合底层有效配对响应的范围，不是模型输出范围或置信区间。
-“有限记录/全部记录”统计 artifact 记录完整性，不能直接当作样本数；“有效输出元素”是
-validity mask 后参与指标计算的 `support_count` 总和。响应正值固定表示干预后任务指标
+恒等对照两列是在相同 checkpoint、sample、`eval()` mode 与随机流下重复执行未改变
+condition 的 cohort 均值和范围，用来呈现重复执行噪声，而不是从实际干预响应中线性扣除。
+响应正值固定表示干预后任务指标
 变差，负值表示改善；这些值只描述模型干预响应，不表示物理因果。
 
 `effect_value` 由基线指标 `B` 和干预后指标 `C` 成对计算：对于越小越好的指标取
@@ -97,6 +120,7 @@ committed、finite 或 rolled-back 总数；训练执行器内部仍可使用这
 
 | 阶段 | 指标 | 展示位置 | 作用 |
 |---|---|---|---|
+| 训练 | `objective_terms` | 各命名训练目标项折线 | 比较总目标、AR、chunk、shape 等命名项的尺度和训练趋势；保留原名区分 loss 与权重 |
 | 训练 | `component_objective_value` | 各输出通道训练目标折线 | 查看通道 loss 长期失衡和突变 |
 | 训练 | `raw_numerator_sum` | 训练目标补充折线 | 核对 support/normalization 前的目标分子 |
 | 训练 | `raw_objective_sum`、`backward_objective_sum` | 同一组合折线 | 核对实际反向目标是否因 cap/divisor 与原始目标分离 |
@@ -134,7 +158,7 @@ committed、finite 或 rolled-back 总数；训练执行器内部仍可使用这
 |---|---|---|
 | `gradients_finite`、optimizer/scaler/scheduler/auxiliary outcome、attempt/update/transaction identity | 否 | 离散执行事实，用于 failure/commit 审计；原始记录比数值图更准确 |
 | objective unit count | 否 | 用于计算 loss-cap 命中比例并核对 objective observation 完整性；只保留 `rejected_microbatch_count` 作为 microbatch 异常方向指标 |
-| objective terms、identity、cap/divisor/AMP/precision/chunk provenance | 否 | 定义图中目标数值的口径，适合详情和原始记录，不适合另画趋势 |
+| objective identity、cap/divisor/AMP/precision/chunk provenance | 否 | 定义图中目标数值的口径，适合详情和原始记录，不适合另画趋势；`objective_terms` 的 loss 数值已进入训练页 |
 | `grad_rms`、`parameter_rms`、`grad_l2`、gradient/parameter numel | 否 | 是 `relative_grad_rms`、`gradient_energy_share` 的充分统计或分母；单独成图会重复尺度事实 |
 | activation/gradient 的 count、sum、square sum、finite/nonfinite count | 否 | 用于跨调用/rank 正确聚合 RMS、std、fraction；属于可复算充分统计 |
 | baseline/condition value、`raw_delta` | 否 | 是 `effect_value` 的成对计算依据；主表已展示 effect、范围和恒等对照 |
@@ -169,9 +193,12 @@ skipped key 仍逐项保留。analysis 目录中的权威 manifest 不被修改�
 finalized stream 的 `evidence_key` 重建。这项压缩只删除报告副本中的重复验证事实，不
 删除诊断观测。
 
-数值序列和自动发现的 metric 不做点数/数量截断。密集趋势图把完整点集合编码为少量
-SVG path，并在内存中保留精确坐标和 tooltip；鼠标靠近时只绘制一个放大点，不为每个
-观测创建独立 DOM node。最终 rollout 先选择一个输出通道和 RMSE/sRMSE 汇总口径，再把
+数值序列和自动发现的 metric 不做点数/数量截断。训练页的 `Loss Components`、
+`Per-Output Loss`、
+整体目标和全局梯度范数把完整点集合编码为每条曲线一个 SVG path，只保留整条曲线的
+悬停说明，不建立逐点 DOM、逐点空间索引或逐点详情；原始 update 数值仍完整保存在 artifact。
+其它需要精确点选的趋势图仍使用单一 hover overlay，不为每个观测创建独立交互层。
+最终 rollout 先选择一个输出通道和 RMSE/sRMSE 汇总口径，再把
 每个显式 horizon 固定画在相互独立且等尺寸的分面中；例如 50 步和 500 步不会共享曲线、
 坐标区或含混的条件标签。曲线固定表示原始尺度 mean absolute error 与 q90；汇总口径选择
 不会重命名或缩放该曲线。每个分面右侧列出所选 RMSE/sRMSE、最大局部误差斜率、不稳定

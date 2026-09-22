@@ -2,8 +2,23 @@
 
 ## 训练过程
 
-训练会自动启用 flight recorder。查看逐输出 loss 是否长期失衡、全局梯度是否突变或
-非有限、microbatch 是否被拒绝。该阶段不用于比较模块重要性。
+训练会自动启用 flight recorder。训练页分别显示 `objective_terms` 中的 `Loss Components`、
+`Per-Output Loss`、实际 backward 的整体目标和 `Global Gradient Norm`，用来查看目标项或输出
+通道是否长期失衡、整体梯度是否突变或非有限、microbatch 是否被拒绝。高密度训练图只
+保留每条曲线，不生成逐 update 点详情，因此不会因数千个交互点拖慢页面。
+
+训练页所有功能图固定使用同一套全宽大图布局。任意图放大后仍保留主图的悬停规则；tooltip
+位于放大 dialog 内部，因此不会被 modal top layer 遮挡。技术标题使用稳定的领域术语，
+例如 `Loss Components`、`Per-Output Loss`、`Global Gradient Norm`、`Raw Training Loss`
+和 `Backward Training Loss`；标题只清理多余空白，不再按单词逐项翻译。
+
+`objective_terms` 保留宿主 ledger 的原始名称；其中的 loss、权重或其它调度量不会由通用
+报告依据字符串重新分类。最新 artifact 中的逐项 loss 都会显示，权重项也以原名保留，避免
+静默隐藏训练事实。
+
+全局梯度范数属于实际 backward 总目标，不能从标量 loss 数值拆成逐 loss 梯度范数。
+flight recorder 不为每个命名 loss 追加 `autograd.grad`；需要逐输出直接梯度时，在逐检查点
+页面查看 `output_gradient_rms`。该阶段不用于比较模块重要性。
 
 ## 逐检查点
 
@@ -40,6 +55,17 @@ model-visible input，不在诊断侧猜测任务语义。
 输入×输出分析在这 8 个 group 上计算逐样本配对响应，但 artifact 只保存每个
 input × output × method 的 cohort 均值、最小值、最大值、support 与缺失计数，不保存
 逐样本笛卡尔积。
+
+最终响应类分析固定使用 `eval()` mode。parameter 在 response-only 分支中保持只读，逐分支
+恢复 registered buffers，整个 analyzer 退出时完整恢复模型状态。输入影响先在同一
+checkpoint、sample 和随机流下重复一次未改变的 baseline，按输出通道汇总为恒等对照；mean replacement 才按每个输入
+通道执行。报告不会把恒等对照显示成一种可筛选干预，而是在每行实际干预旁显示对照均值
+和范围。support、改动元素、样本覆盖和未干预路径核对仍保留在原始 artifact，只有异常时
+进入折叠有效性表。
+
+`Stage/Block Influence` 不是单一模块结果。报告先显示全部已确认模块的覆盖数量，并提供
+`Stage` / `Block` 层级筛选和具体模块筛选；主表、缺失核对表及折叠色块矩阵共享同一筛选。
+每个实际干预记录仍保留明确的 `hierarchy_level`、`module_path` 和输出通道身份。
 
 输入扰动敏感度使用 task profile 固定的多个模型输入坐标幅度。对同一个
 `sample × input`，全部尺度复用同一 Rademacher 方向并执行正负配对；只有两侧都成功的

@@ -18,7 +18,7 @@ ANALYZER_DEFINITIONS = (
         name="final_channel_influence",
         evidence_kind="predictive_dependence_intervention",
         execution_mode="aggregate",
-        definition_version=1,
+        definition_version=2,
         claim_boundaries=(
             "mean replacement measures model response under that intervention",
             "input-output response does not establish physical causality",
@@ -42,7 +42,7 @@ REPORT_RENDERER_DEFINITIONS = (
     EvidenceRendererDefinition(
         evidence_kind="predictive_dependence_intervention",
         title="输入通道对输出通道的影响",
-        analyzer_definition_version=1,
+        analyzer_definition_version=2,
         metrics=(
             EvidenceMetric(
                 "effect_value",
@@ -63,7 +63,8 @@ REPORT_RENDERER_DEFINITIONS = (
                     "输入通道对同一输出的响应幅度，或比较同一输入影响了哪些输出。"
                 ),
                 reference=(
-                    "恒等替换对照应接近 0；实际替换只有明显超过恒等对照波动时"
+                    "同 checkpoint、样本、eval mode 和随机流下的重复前向恒等对照"
+                    "应接近 0；实际替换只有明显超过恒等对照波动时"
                     "才说明该干预产生了可测的模型响应。"
                 ),
                 invalid_when=(
@@ -87,7 +88,10 @@ REPORT_RENDERER_DEFINITIONS = (
                     "用于比较原始指标量级不同的输出，但只应在输出评价指标语义、"
                     "normalization 和 cohort 一致时比较。"
                 ),
-                reference="恒等替换对照应接近 0；绝对值越大表示相对基线的响应越强。",
+                reference=(
+                    "同 checkpoint、样本、eval mode 和随机流下的重复前向恒等对照"
+                    "应接近 0；绝对值越大表示相对基线的响应越强。"
+                ),
                 invalid_when=(
                     "基线值接近 0 时分母会使用 1e-12 下限，结果可能被极度放大；"
                     "不同 metric 的相对响应也不能直接比较。"
